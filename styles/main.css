@@ -99,7 +99,7 @@ body.lang-ar {
 /* ── Sidebar ── */
 .sidebar {
   width: var(--sidebar-w);
-  min-height: 100vh;
+  height: 100vh;
   background: var(--bg-surface);
   border-right: 1px solid var(--border-subtle);
   display: flex;
