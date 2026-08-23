@@ -15,23 +15,24 @@ const CoachesModule = (() => {
   let _rows = []; // working specialty rows while the modal is open
 
   const DAYS = [
-    { key:'sun', label:'Sun' }, { key:'mon', label:'Mon' }, { key:'tue', label:'Tue' },
-    { key:'wed', label:'Wed' }, { key:'thu', label:'Thu' }, { key:'fri', label:'Fri' },
-    { key:'sat', label:'Sat' }
+    { key:'sun' }, { key:'mon' }, { key:'tue' },
+    { key:'wed' }, { key:'thu' }, { key:'fri' },
+    { key:'sat' }
   ];
+  function dayLabel(key) { return App.t('day_' + key); }
 
   function formatTime12(hhmm) {
     if (!hhmm) return '';
     const [h, m] = hhmm.split(':').map(Number);
-    const period = h >= 12 ? 'PM' : 'AM';
+    const period = h >= 12 ? App.t('pm_label') : App.t('am_label');
     const h12 = h % 12 === 0 ? 12 : h % 12;
     return `${h12}:${String(m).padStart(2,'0')} ${period}`;
   }
 
   function formatDays(days) {
     if (!days || !days.length) return '';
-    if (days.length === 7) return 'Daily';
-    return DAYS.filter(d => days.includes(d.key)).map(d => d.label).join(' ');
+    if (days.length === 7) return App.t('daily_word');
+    return DAYS.filter(d => days.includes(d.key)).map(d => dayLabel(d.key)).join(' ');
   }
 
   function sportIcon(sportId) {
@@ -85,7 +86,7 @@ const CoachesModule = (() => {
                 <div class="form-error-msg"></div>
               </div>
               <div class="form-group">
-                <label class="form-label">Monthly Base Salary (USD)</label>
+                <label class="form-label">${t('monthly_base_salary')}</label>
                 <input class="form-input" id="cf-salary" type="number" min="0" placeholder="0">
               </div>
             </div>
@@ -96,10 +97,10 @@ const CoachesModule = (() => {
               </div>
             </div>
 
-            <div class="form-section-title">Sport Specialties & Session Schedule</div>
+            <div class="form-section-title">${t('sport_specialties_schedule')}</div>
             <div id="specialty-rows"></div>
             <button class="btn btn-outline btn-sm" type="button" onclick="CoachesModule.addRow()" style="margin-bottom:18px">
-              + Add Sport Specialty
+              ${t('add_sport_specialty')}
             </button>
 
             <div class="form-row cols-1">
@@ -125,7 +126,7 @@ const CoachesModule = (() => {
     ]);
     _all = coSnap.docs.map(d => ({id:d.id,...d.data()}));
     _sports = spSnap.docs.map(d => ({id:d.id,...d.data()}));
-    document.getElementById('coach-count').textContent = `${_all.length} coach${_all.length!==1?'es':''}`;
+    document.getElementById('coach-count').textContent = `${_all.length} ${App.t(_all.length===1?'coach_singular':'coach_plural')}`;
     renderGrid(_all);
   }
 
@@ -146,9 +147,9 @@ const CoachesModule = (() => {
             <div class="coach-card-sport">📞 ${c.phone || '—'} · ${App.t('commission')}: <span style="color:var(--gold-400)">${c.commission||0}%</span></div>
           </div>
         </div>
-        <div class="coach-specialty-tags">${tags || `<span class="text-muted text-sm">No sports assigned</span>`}</div>
+        <div class="coach-specialty-tags">${tags || `<span class="text-muted text-sm">${App.t('no_sports_assigned')}</span>`}</div>
         <div class="flex gap-2" style="margin-top:8px">
-          ${c.phone ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();window.open('${buildWhatsAppLink(c.phone,'Hello from Venus Gym')}','_blank')">💬 WhatsApp</button>` : ''}
+          ${c.phone ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();window.open('${buildWhatsAppLink(c.phone,App.t('hello_from_venus'))}','_blank')">💬 WhatsApp</button>` : ''}
           <button class="btn btn-outline btn-sm" onclick="CoachesModule.openEdit('${c.id}')">✏️ ${App.t('edit')}</button>
           <button class="btn btn-danger btn-sm" onclick="CoachesModule.del('${c.id}','${c.name.replace(/'/g,"\\'")}')">🗑</button>
         </div>
@@ -171,7 +172,7 @@ const CoachesModule = (() => {
     const el = document.getElementById('specialty-rows');
     if (!el) return;
     if (!_rows.length) {
-      el.innerHTML = `<p class="text-muted text-sm" style="margin-bottom:12px">No sports assigned yet — click "Add Sport Specialty" below.</p>`;
+      el.innerHTML = `<p class="text-muted text-sm" style="margin-bottom:12px">${App.t('no_sports_assigned_yet_click')}</p>`;
       return;
     }
     el.innerHTML = _rows.map((row, i) => {
@@ -181,15 +182,15 @@ const CoachesModule = (() => {
         <div class="specialty-row">
           <div class="specialty-row-top">
             <select class="form-select" onchange="CoachesModule.setRowSport(${i}, this.value)">
-              <option value="">Select sport…</option>
+              <option value="">${App.t('select_sport_placeholder')}</option>
               ${options.map(s => `<option value="${s.id}" ${row.sportId === s.id ? 'selected' : ''}>${s.icon || ''} ${s.name}</option>`).join('')}
             </select>
-            <input class="form-input" type="time" value="${row.time || ''}" onchange="CoachesModule.setRowTime(${i}, this.value)" title="Session time">
+            <input class="form-input" type="time" value="${row.time || ''}" onchange="CoachesModule.setRowTime(${i}, this.value)" title="${App.t('session_time')}">
             <button class="btn btn-danger btn-sm btn-icon" type="button" onclick="CoachesModule.removeRow(${i})">✕</button>
           </div>
           <div class="day-chip-row">
             ${DAYS.map(d => `
-              <span class="day-chip ${row.days.includes(d.key) ? 'active' : ''}" onclick="CoachesModule.toggleRowDay(${i}, '${d.key}')">${d.label}</span>
+              <span class="day-chip ${row.days.includes(d.key) ? 'active' : ''}" onclick="CoachesModule.toggleRowDay(${i}, '${d.key}')">${dayLabel(d.key)}</span>
             `).join('')}
           </div>
         </div>`;
@@ -197,7 +198,7 @@ const CoachesModule = (() => {
   }
 
   function addRow() {
-    if (_rows.length >= _sports.length) { Toast.warning('All available sports are already assigned.'); return; }
+    if (_rows.length >= _sports.length) { Toast.warning(App.t('all_sports_assigned_warning')); return; }
     _rows.push(freshRow());
     renderRows();
   }
@@ -249,7 +250,7 @@ const CoachesModule = (() => {
     if (!Validate.form([
       {id:'cf-name',rules:['required'],label:App.t('name')},
       {id:'cf-phone',rules:['required'],label:App.t('phone')},
-      {id:'cf-commission',rules:['required'],label:'Commission'},
+      {id:'cf-commission',rules:['required'],label:App.t('commission')},
     ])) return;
 
     const specialties = _rows
@@ -278,7 +279,7 @@ const CoachesModule = (() => {
   }
 
   function del(id, name) {
-    Modal.confirm({ title:'Delete Coach', message:`${App.t('delete_confirm')}<br><strong>${name}</strong>`, type:'danger',
+    Modal.confirm({ title:App.t('delete_coach_title'), message:`${App.t('delete_confirm')}<br><strong>${name}</strong>`, type:'danger',
       confirmText:App.t('delete'), onConfirm: async ()=>{ await _db.collection(COL.COACHES).doc(id).delete(); Toast.success(App.t('deleted')); await loadData(); }
     });
   }
@@ -321,12 +322,12 @@ const SportsModule = (() => {
           <div class="modal-body">
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label">Name (EN) <span class="required">*</span></label>
+                <label class="form-label">${t('name_en')} <span class="required">*</span></label>
                 <input class="form-input" id="spf-name" placeholder="e.g. Yoga">
                 <div class="form-error-msg"></div>
               </div>
               <div class="form-group">
-                <label class="form-label">Name (AR)</label>
+                <label class="form-label">${t('name_ar')}</label>
                 <input class="form-input" id="spf-name-ar" placeholder="مثال: يوغا" dir="rtl">
               </div>
             </div>
@@ -340,7 +341,7 @@ const SportsModule = (() => {
                 <div class="form-error-msg"></div>
               </div>
               <div class="form-group">
-                <label class="form-label">Icon</label>
+                <label class="form-label">${t('icon_word')}</label>
                 <select class="form-select" id="spf-icon">
                   ${SPORT_ICONS.map(i=>`<option value="${i}">${i} ${i}</option>`).join('')}
                 </select>
@@ -348,7 +349,7 @@ const SportsModule = (() => {
             </div>
             <div class="form-row cols-1">
               <div class="form-group">
-                <label class="form-label">Description</label>
+                <label class="form-label">${t('description_word')}</label>
                 <textarea class="form-textarea" id="spf-desc" rows="2"></textarea>
               </div>
             </div>
@@ -365,7 +366,7 @@ const SportsModule = (() => {
   async function loadData() {
     const snap = await _db.collection(COL.SPORTS).orderBy('name').get();
     _all = snap.docs.map(d=>({id:d.id,...d.data()}));
-    document.getElementById('sport-count').textContent = `${_all.length} sport${_all.length!==1?'s':''}`;
+    document.getElementById('sport-count').textContent = `${_all.length} ${App.t(_all.length===1?'sport':'sports').toLowerCase()}`;
     const grid = document.getElementById('sports-grid');
     grid.innerHTML = _all.length ? _all.map(s=>`
       <div class="sport-card">
@@ -399,7 +400,7 @@ const SportsModule = (() => {
   }
 
   async function save() {
-    if(!Validate.form([{id:'spf-name',rules:['required'],label:'Name'},{id:'spf-price',rules:['required'],label:'Price'}]))return;
+    if(!Validate.form([{id:'spf-name',rules:['required'],label:App.t('name_generic')},{id:'spf-price',rules:['required'],label:App.t('price_generic')}]))return;
     const data={
       name:document.getElementById('spf-name').value.trim(),
       nameAr:document.getElementById('spf-name-ar').value.trim(),
@@ -416,7 +417,7 @@ const SportsModule = (() => {
   }
 
   function del(id,name){
-    Modal.confirm({title:'Delete Sport',message:`${App.t('delete_confirm')}<br><strong>${name}</strong>`,type:'danger',
+    Modal.confirm({title:App.t('delete_sport_title'),message:`${App.t('delete_confirm')}<br><strong>${name}</strong>`,type:'danger',
       confirmText:App.t('delete'),onConfirm:async()=>{await _db.collection(COL.SPORTS).doc(id).delete();Toast.success(App.t('deleted'));await loadData();}
     });
   }
@@ -431,6 +432,7 @@ const SportsModule = (() => {
 const SubscriptionsModule = (() => {
   let _db, _all = [], _sports = [], _coaches = [], _subscribers = [];
   let _page = 1; const PER_PAGE = 15;
+  let _editId = null;
 
   async function render(db, profile) {
     _db = db;
@@ -449,22 +451,27 @@ const SubscriptionsModule = (() => {
       <div class="search-bar">
         <div class="search-input-wrap">
           <span class="search-icon">🔍</span>
-          <input class="search-input" id="subs-search" placeholder="${t('search')}" oninput="SubscriptionsModule.onSearch(this.value)">
+          <input class="search-input" id="subs-search" placeholder="${t('search_subscriber_or_sport')}" autocomplete="off"
+            oninput="SubscriptionsModule.onSearch(this.value)"
+            onfocus="SubscriptionsModule.showSearchSuggestions(this.value)"
+            onblur="setTimeout(SubscriptionsModule.hideSearchSuggestions, 150)">
+          <div class="combo-dropdown" id="subs-search-dropdown"></div>
         </div>
         <select class="filter-select" id="subs-filter" onchange="SubscriptionsModule.onFilter()">
-          <option value="">All Status</option>
+          <option value="">${t('all_status')}</option>
           <option value="active">${t('active')}</option>
           <option value="expired">${t('expired')}</option>
           <option value="expiring">${t('expiring_soon')}</option>
           <option value="partial">${t('partial')}</option>
+          <option value="unpaid">${t('unpaid')}</option>
         </select>
       </div>
       <div class="table-wrap">
         <div class="table-scroll">
           <table>
             <thead><tr>
-              <th>#</th><th>Subscriber</th><th>${t('sport')}</th>
-              <th>${t('coach')}</th><th>Period</th><th>Status</th>
+              <th>#</th><th>${t('subscriber_singular')}</th><th>${t('sport')}</th>
+              <th>${t('coach')}</th><th>${t('period_col')}</th><th>${t('status_lbl')}</th>
               <th>${t('total')}</th><th>${t('paid')}</th><th>${t('remaining')}</th><th>${t('actions')}</th>
             </tr></thead>
             <tbody id="subs-tbody"></tbody>
@@ -488,13 +495,48 @@ const SubscriptionsModule = (() => {
     _sports = sp.docs.map(d=>({id:d.id,...d.data()}));
     _coaches = co.docs.map(d=>({id:d.id,...d.data()}));
     _subscribers = su.docs.map(d=>({id:d.id,...d.data()}));
-    const subSel = document.getElementById('subf-subscriber');
     const spSel = document.getElementById('subf-sport');
     const coSel = document.getElementById('subf-coach');
-    if(subSel) _subscribers.forEach(s=>{const o=document.createElement('option');o.value=s.id;o.textContent=s.name;subSel.appendChild(o);});
     if(spSel) _sports.forEach(s=>{const o=document.createElement('option');o.value=s.id;o.textContent=`${s.name} — ${Currency.formatUSD(s.price)}`;spSel.appendChild(o);});
     populateCoachSelect(); // full list until a sport narrows it down
     if(spSel) spSel.addEventListener('change',()=>{autoFillPrice(); populateCoachSelect(spSel.value);});
+  }
+
+  /* ── Searchable subscriber combo ──────────────────── */
+  function renderSubscriberDropdown(query) {
+    const dd = document.getElementById('subf-subscriber-dropdown');
+    if (!dd) return;
+    const q = (query || '').trim().toLowerCase();
+    const matches = !q ? _subscribers
+      : _subscribers.filter(s => s.name?.toLowerCase().includes(q) || s.phone?.includes(q));
+    dd.innerHTML = matches.length
+      ? matches.slice(0, 50).map(s => {
+          const esc = (s.name || '').replace(/'/g, "\\'");
+          return `<div class="combo-item" onmousedown="event.preventDefault();SubscriptionsModule.selectSubscriber('${s.id}','${esc}')">
+            <span>${s.name}</span>${s.phone ? `<span class="combo-item-sub">${s.phone}</span>` : ''}
+          </div>`;
+        }).join('')
+      : `<div class="combo-item combo-empty">${App.t('no_matching_subscribers')}</div>`;
+    dd.classList.add('open');
+  }
+
+  function onSubscriberSearch(val) {
+    const hidden = document.getElementById('subf-subscriber');
+    if (hidden) hidden.value = ''; // typing invalidates the previous pick until re-selected from the list
+    renderSubscriberDropdown(val);
+  }
+
+  function selectSubscriber(id, name) {
+    const hidden = document.getElementById('subf-subscriber');
+    const input = document.getElementById('subf-subscriber-input');
+    if (hidden) hidden.value = id;
+    if (input) input.value = name;
+    hideSubscriberDropdown();
+  }
+
+  function hideSubscriberDropdown() {
+    const dd = document.getElementById('subf-subscriber-dropdown');
+    if (dd) dd.classList.remove('open');
   }
 
   function populateCoachSelect(sportId = '') {
@@ -508,7 +550,7 @@ const SubscriptionsModule = (() => {
     }
     coSel.innerHTML = '';
     const noneOpt = document.createElement('option');
-    noneOpt.value = ''; noneOpt.textContent = 'No Coach';
+    noneOpt.value = ''; noneOpt.textContent = App.t('no_coach_lbl');
     coSel.appendChild(noneOpt);
     pool.forEach(c => {
       const opt = document.createElement('option');
@@ -538,10 +580,11 @@ const SubscriptionsModule = (() => {
     _all.forEach(s=>{
       if(DateUtil.isExpired(s.endDate)) s._status='expired';
       else if(DateUtil.isExpiringSoon(s.endDate,7)) s._status='expiring';
+      else if(!(s.amountPaid>0) && (s.totalAmount||0)>0) s._status='unpaid';
       else if((s.amountPaid||0)<(s.totalAmount||0)) s._status='partial';
       else s._status='active';
     });
-    document.getElementById('subs-count').textContent = `${_all.length} subscriptions`;
+    document.getElementById('subs-count').textContent = `${_all.length} ${App.t('subscriptions').toLowerCase()}`;
     renderTable(_all);
   }
 
@@ -558,10 +601,11 @@ const SubscriptionsModule = (() => {
         active:`<span class="badge badge-active">● ${App.t('active')}</span>`,
         expired:`<span class="badge badge-expired">● ${App.t('expired')}</span>`,
         expiring:`<span class="badge badge-warning">● ${App.t('expiring_soon')}</span>`,
-        partial:`<span class="badge badge-info">⊘ ${App.t('partial')}</span>`
+        partial:`<span class="badge badge-info">⊘ ${App.t('partial')}</span>`,
+        unpaid:`<span class="badge badge-expired">✕ ${App.t('unpaid')}</span>`
       }[s._status]||'';
       const esc=(s.subscriberName||'').replace(/'/g,"\\'");
-      const payBtn=remaining>0?`<button class="btn btn-success btn-sm" onclick="SubscriptionsModule.payRemaining('${s.id}','${esc}',${remaining})">💰 Pay</button>`:'';
+      const payBtn=remaining>0?`<button class="btn btn-success btn-sm" onclick="SubscriptionsModule.payRemaining('${s.id}','${esc}',${remaining})">💰 ${App.t('pay_btn')}</button>`:'';
       return `<tr>
         <td class="dt-only" style="color:var(--text-muted)">${num}</td>
         <td class="dt-only"><strong>${s.subscriberName||'—'}</strong></td>
@@ -573,6 +617,7 @@ const SubscriptionsModule = (() => {
         <td class="dt-only" style="color:var(--success)">${Currency.formatUSD(s.amountPaid||0)}</td>
         <td class="dt-only" style="color:${remColor}">${Currency.formatUSD(remaining)}</td>
         <td class="dt-only"><div class="flex gap-2">${payBtn}
+          <button class="btn btn-outline btn-sm btn-icon" onclick="SubscriptionsModule.openEdit('${s.id}')">✏️</button>
           <button class="btn btn-danger btn-sm btn-icon" onclick="SubscriptionsModule.del('${s.id}')">🗑</button>
         </div></td>
         <td class="mob-only" colspan="10" style="padding:6px 0;border:none">
@@ -585,13 +630,14 @@ const SubscriptionsModule = (() => {
               ${statusBadge}
             </div>
             <div class="mobile-card-body">
-              <div class="mobile-card-row"><span>Period</span><span style="font-size:11px">${DateUtil.format(s.startDate)} → ${DateUtil.format(s.endDate)}</span></div>
-              <div class="mobile-card-row"><span>Total</span><span>${Currency.formatUSD(s.totalAmount||0)}</span></div>
-              <div class="mobile-card-row"><span>Paid</span><span style="color:var(--success)">${Currency.formatUSD(s.amountPaid||0)}</span></div>
-              <div class="mobile-card-row"><span>Remaining</span><span style="color:${remColor}">${Currency.formatUSD(remaining)}</span></div>
+              <div class="mobile-card-row"><span>${App.t('period_col')}</span><span style="font-size:11px">${DateUtil.format(s.startDate)} → ${DateUtil.format(s.endDate)}</span></div>
+              <div class="mobile-card-row"><span>${App.t('total')}</span><span>${Currency.formatUSD(s.totalAmount||0)}</span></div>
+              <div class="mobile-card-row"><span>${App.t('paid')}</span><span style="color:var(--success)">${Currency.formatUSD(s.amountPaid||0)}</span></div>
+              <div class="mobile-card-row"><span>${App.t('remaining')}</span><span style="color:${remColor}">${Currency.formatUSD(remaining)}</span></div>
             </div>
             <div class="mobile-card-actions">${payBtn}
-              <button class="btn btn-danger btn-sm" onclick="SubscriptionsModule.del('${s.id}')">🗑 Delete</button>
+              <button class="btn btn-outline btn-sm" onclick="SubscriptionsModule.openEdit('${s.id}')">✏️ ${App.t('edit')}</button>
+              <button class="btn btn-danger btn-sm" onclick="SubscriptionsModule.del('${s.id}')">🗑 ${App.t('delete')}</button>
             </div>
           </div>
         </td>
@@ -602,7 +648,74 @@ const SubscriptionsModule = (() => {
   }
 
   function goPage(p){_page=p;renderTable(_all);}
-  const onSearch=debounce(v=>{const q=v.toLowerCase();renderTable(_all.filter(s=>s.subscriberName?.toLowerCase().includes(q)||s.sportName?.toLowerCase().includes(q)));},280);
+
+  function applySubsSearch(q) {
+    q = (q||'').toLowerCase();
+    renderTable(!q ? _all : _all.filter(s=>s.subscriberName?.toLowerCase().includes(q)||s.sportName?.toLowerCase().includes(q)));
+  }
+  const _debouncedSubsSearch = debounce(applySubsSearch, 280);
+
+  function onSearch(v) {
+    renderSubsSearchSuggestions(v);
+    _debouncedSubsSearch(v);
+  }
+
+  /* ── Search box type-ahead (subscribers + sports) ──── */
+  function renderSubsSearchSuggestions(query) {
+    const dd = document.getElementById('subs-search-dropdown');
+    if (!dd) return;
+    const q = (query || '').trim().toLowerCase();
+
+    const subMatches = (!q ? _subscribers
+      : _subscribers.filter(s => s.name?.toLowerCase().includes(q) || s.phone?.includes(q))
+    ).slice(0, 6);
+    const sportMatches = (!q ? _sports
+      : _sports.filter(sp => sp.name?.toLowerCase().includes(q))
+    ).slice(0, 5);
+
+    if (!subMatches.length && !sportMatches.length) {
+      dd.innerHTML = `<div class="combo-item combo-empty">${App.t('no_matches')}</div>`;
+      dd.classList.add('open');
+      return;
+    }
+
+    let html = '';
+    if (subMatches.length) {
+      html += `<div class="combo-group-label">${App.t('subscribers')}</div>`;
+      html += subMatches.map(s => {
+        const esc = (s.name || '').replace(/'/g, "\\'");
+        return `<div class="combo-item" onmousedown="event.preventDefault();SubscriptionsModule.selectSearchTerm('${esc}')">
+          <span>${s.name}</span>${s.phone ? `<span class="combo-item-sub">${s.phone}</span>` : ''}
+        </div>`;
+      }).join('');
+    }
+    if (sportMatches.length) {
+      html += `<div class="combo-group-label">${App.t('sports')}</div>`;
+      html += sportMatches.map(sp => {
+        const esc = (sp.name || '').replace(/'/g, "\\'");
+        return `<div class="combo-item" onmousedown="event.preventDefault();SubscriptionsModule.selectSearchTerm('${esc}')">
+          <span>${sp.icon || '🏋️'} ${sp.name}</span><span class="combo-item-sub">${App.t('sport')}</span>
+        </div>`;
+      }).join('');
+    }
+    dd.innerHTML = html;
+    dd.classList.add('open');
+  }
+
+  function showSearchSuggestions(val) { renderSubsSearchSuggestions(val); }
+
+  function hideSearchSuggestions() {
+    const dd = document.getElementById('subs-search-dropdown');
+    if (dd) dd.classList.remove('open');
+  }
+
+  function selectSearchTerm(text) {
+    const input = document.getElementById('subs-search');
+    if (input) input.value = text;
+    hideSearchSuggestions();
+    applySubsSearch(text);
+  }
+
   function onFilter(){const f=document.getElementById('subs-filter')?.value;renderTable(f?_all.filter(s=>s._status===f):_all);}
 
   function buildModal(){
@@ -610,20 +723,27 @@ const SubscriptionsModule = (() => {
     return `<div class="modal-overlay" id="modal-subscription">
       <div class="modal modal-lg">
         <div class="modal-header">
-          <span class="modal-title">${t('new_subscription')}</span>
+          <span class="modal-title" id="subscription-modal-title">${t('new_subscription')}</span>
           <button class="modal-close" onclick="Modal.close('modal-subscription')">✕</button>
         </div>
         <div class="modal-body">
-          <div class="form-section-title">Link Subscriber</div>
+          <div class="form-section-title">${t('link_subscriber_section')}</div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Subscriber <span class="required">*</span></label>
-              <select class="form-select" id="subf-subscriber"><option value="">Select subscriber…</option></select>
+              <label class="form-label">${t('subscriber_singular')} <span class="required">*</span></label>
+              <div class="combo-select" id="subf-subscriber-combo">
+                <input class="form-input" id="subf-subscriber-input" placeholder="${t('type_name_to_search')}" autocomplete="off"
+                  oninput="SubscriptionsModule.onSubscriberSearch(this.value)"
+                  onfocus="SubscriptionsModule.onSubscriberSearch(this.value)"
+                  onblur="setTimeout(SubscriptionsModule.hideSubscriberDropdown, 150)">
+                <div class="combo-dropdown" id="subf-subscriber-dropdown"></div>
+              </div>
+              <input type="hidden" id="subf-subscriber">
               <div class="form-error-msg"></div>
             </div>
             <div class="form-group">
               <label class="form-label">${t('sport')} <span class="required">*</span></label>
-              <select class="form-select" id="subf-sport"><option value="">Select sport…</option></select>
+              <select class="form-select" id="subf-sport"><option value="">${t('select_sport_placeholder')}</option></select>
               <div class="form-error-msg"></div>
             </div>
           </div>
@@ -633,20 +753,20 @@ const SubscriptionsModule = (() => {
               <select class="form-select" id="subf-coach"></select>
             </div>
             <div class="form-group">
-              <label class="form-label">Months</label>
+              <label class="form-label">${t('months_word')}</label>
               <select class="form-select" id="subf-months">
-                <option value="1">1 Month</option>
-                <option value="2">2 Months</option>
-                <option value="3">3 Months</option>
-                <option value="6">6 Months</option>
-                <option value="12">12 Months</option>
+                <option value="1">1 ${t('month_singular')}</option>
+                <option value="2">2 ${t('month_plural')}</option>
+                <option value="3">3 ${t('month_plural')}</option>
+                <option value="6">6 ${t('month_plural')}</option>
+                <option value="12">12 ${t('month_plural')}</option>
               </select>
             </div>
           </div>
-          <div class="form-section-title">Payment</div>
-          <div class="form-row cols-3">
+          <div class="form-section-title">${t('payment_section')}</div>
+          <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Total Price (USD) <span class="required">*</span></label>
+              <label class="form-label">${t('total_price_usd')} <span class="required">*</span></label>
               <div class="currency-input-wrap">
                 <span class="currency-prefix">$</span>
                 <input class="form-input" id="subf-price" type="number" min="0" placeholder="0">
@@ -654,18 +774,11 @@ const SubscriptionsModule = (() => {
               <div class="form-error-msg"></div>
             </div>
             <div class="form-group">
-              <label class="form-label">${t('amount_paid')} (USD) <span class="required">*</span></label>
+              <label class="form-label">${t('amount_paid')} (USD) <span class="text-muted" style="font-weight:400;font-size:11px">${t('optional_leave_blank_unpaid')}</span></label>
               <div class="currency-input-wrap">
                 <span class="currency-prefix">$</span>
                 <input class="form-input" id="subf-paid" type="number" min="0" placeholder="0">
               </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">${t('payment_method')}</label>
-              <select class="form-select" id="subf-paymethod">
-                <option value="cash">${t('cash')}</option>
-                <option value="partial">${t('partial')}</option>
-              </select>
             </div>
           </div>
           <div class="form-row">
@@ -694,72 +807,133 @@ const SubscriptionsModule = (() => {
   }
 
   function openNew(subscriberId='', subscriberName=''){
+    _editId = null;
+    document.getElementById('subscription-modal-title').textContent = App.t('new_subscription');
     ['subf-sport','subf-coach','subf-notes'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     populateCoachSelect();
     document.getElementById('subf-price').value='';
+    delete document.getElementById('subf-price').dataset.manual;
     document.getElementById('subf-paid').value='';
     document.getElementById('subf-start').value=DateUtil.today();
     document.getElementById('subf-end').value='';
-    if(subscriberId){const sel=document.getElementById('subf-subscriber');if(sel)sel.value=subscriberId;}
-    // Auto-calculate end date
-    const startEl=document.getElementById('subf-start');
-    const monthsEl=document.getElementById('subf-months');
-    const endEl=document.getElementById('subf-end');
-    const calcEnd=()=>{if(startEl.value&&monthsEl.value)endEl.value=DateUtil.addMonths(startEl.value,Number(monthsEl.value));};
-    startEl.addEventListener('change',calcEnd);
-    monthsEl.addEventListener('change',calcEnd);
+    const monthsEl0=document.getElementById('subf-months'); if(monthsEl0) monthsEl0.value='1';
+    const subInput = document.getElementById('subf-subscriber-input');
+    const subHidden = document.getElementById('subf-subscriber');
+    if (subInput) subInput.value = subscriberName || '';
+    if (subHidden) subHidden.value = subscriberId || '';
+    hideSubscriberDropdown();
+    const calcEnd = bindDateAutoCalc();
     calcEnd();
     Modal.open('modal-subscription');
   }
 
+  function openEdit(id){
+    const s = _all.find(x=>x.id===id);
+    if (!s) return;
+    _editId = id;
+    document.getElementById('subscription-modal-title').textContent = App.t('edit') + ': ' + (s.subscriberName||'');
+    populateCoachSelect(s.sportId||'');
+    const spEl=document.getElementById('subf-sport'); if(spEl) spEl.value = s.sportId||'';
+    const coEl=document.getElementById('subf-coach'); if(coEl) coEl.value = s.coachId||'';
+    document.getElementById('subf-notes').value = s.notes||'';
+    document.getElementById('subf-price').value = s.totalAmount||'';
+    const priceEl=document.getElementById('subf-price'); if(priceEl) priceEl.dataset.manual='1'; // keep the stored price, don't auto-overwrite from sport
+    document.getElementById('subf-paid').value = s.amountPaid||'';
+    document.getElementById('subf-start').value = s.startDate||'';
+    document.getElementById('subf-end').value = s.endDate||'';
+    const monthsEl=document.getElementById('subf-months'); if(monthsEl) monthsEl.value='1';
+    const subInput = document.getElementById('subf-subscriber-input');
+    const subHidden = document.getElementById('subf-subscriber');
+    if (subInput) subInput.value = s.subscriberName || '';
+    if (subHidden) subHidden.value = s.subscriberId || '';
+    hideSubscriberDropdown();
+    bindDateAutoCalc(); // don't recalc — keep the stored end date until start/months are actually changed
+    Modal.open('modal-subscription');
+  }
+
+  /* ── Auto end-date calc, bound once regardless of how many times the modal reopens ── */
+  let _dateListenersBound = false;
+  function bindDateAutoCalc(){
+    const startEl=document.getElementById('subf-start');
+    const monthsEl=document.getElementById('subf-months');
+    const endEl=document.getElementById('subf-end');
+    const calcEnd=()=>{if(startEl.value&&monthsEl.value)endEl.value=DateUtil.addMonths(startEl.value,Number(monthsEl.value));};
+    if(!_dateListenersBound){
+      startEl.addEventListener('change',calcEnd);
+      monthsEl.addEventListener('change',calcEnd);
+      _dateListenersBound = true;
+    }
+    return calcEnd;
+  }
+
   async function save(){
-    if(!Validate.form([
-      {id:'subf-subscriber',rules:['required'],label:'Subscriber'},
-      {id:'subf-sport',rules:['required'],label:'Sport'},
-      {id:'subf-price',rules:['required'],label:'Price'},
-      {id:'subf-paid',rules:['required'],label:'Amount Paid'},
-      {id:'subf-start',rules:['required'],label:'Start Date'},
-    ]))return;
+    const valid = Validate.form([
+      {id:'subf-subscriber',rules:['required'],label:App.t('subscriber_singular')},
+      {id:'subf-sport',rules:['required'],label:App.t('sport')},
+      {id:'subf-price',rules:['required'],label:App.t('price_generic')},
+      {id:'subf-start',rules:['required'],label:App.t('start_date')},
+    ]);
+    const subInput = document.getElementById('subf-subscriber-input');
+    const subHidden = document.getElementById('subf-subscriber');
+    if (subInput) subInput.classList.toggle('error', subHidden?.classList.contains('error'));
+    if (!valid) return;
     const subId=document.getElementById('subf-subscriber').value;
     const spId=document.getElementById('subf-sport').value;
     const coId=document.getElementById('subf-coach').value;
     const sub=_subscribers.find(s=>s.id===subId);
     const sport=_sports.find(s=>s.id===spId);
     const coach=_coaches.find(c=>c.id===coId)||null;
+    const totalAmount = Number(document.getElementById('subf-price').value)||0;
+    const amountPaid  = Number(document.getElementById('subf-paid').value)||0;
+    const paymentMethod = amountPaid <= 0 ? 'unpaid' : amountPaid < totalAmount ? 'partial' : 'paid';
     const data={
       subscriberId:subId, subscriberName:sub?.name||'',
       sportId:spId, sportName:sport?.name||'',
       coachId:coId||null, coachName:coach?.name||null,
       coachCommission:coach?.commission||0,
-      totalAmount:Number(document.getElementById('subf-price').value)||0,
-      amountPaid:Number(document.getElementById('subf-paid').value)||0,
-      paymentMethod:document.getElementById('subf-paymethod').value,
+      totalAmount, amountPaid,
+      paymentMethod,
       startDate:document.getElementById('subf-start').value,
       endDate:document.getElementById('subf-end').value,
       notes:document.getElementById('subf-notes').value.trim(),
-      createdAt:firebase.firestore.FieldValue.serverTimestamp(),
     };
     try{
-      await _db.collection(COL.SUBSCRIPTIONS).add(data);
-      await logActivity(_db,'subscription_added',{subscriber:data.subscriberName,sport:data.sportName});
+      if(_editId){
+        await _db.collection(COL.SUBSCRIPTIONS).doc(_editId).update(data);
+        await logActivity(_db,'subscription_updated',{subscriber:data.subscriberName,subscriberId:data.subscriberId,sport:data.sportName,amount:data.totalAmount,paid:data.amountPaid});
+      } else {
+        data.createdAt=firebase.firestore.FieldValue.serverTimestamp();
+        await _db.collection(COL.SUBSCRIPTIONS).add(data);
+        await logActivity(_db,'subscription_added',{subscriber:data.subscriberName,subscriberId:data.subscriberId,sport:data.sportName,amount:data.totalAmount,paid:data.amountPaid});
+      }
       Toast.success(App.t('saved')); Modal.close('modal-subscription'); await loadData();
     }catch(e){Toast.error(App.t('error_generic'));}
   }
 
   function payRemaining(id,name,remaining){
-    Modal.confirm({title:'Record Payment',
-      message:`Record remaining payment of <strong>${Currency.formatUSD(remaining)}</strong> for <strong>${name}</strong>?`,
-      type:'success',confirmText:'💰 Confirm Payment',
+    Modal.confirm({title:App.t('record_payment_title'),
+      message:`${App.t('confirm_payment_of')} <strong>${Currency.formatUSD(remaining)}</strong> ${App.t('for_member')} <strong>${name}</strong>?`,
+      type:'success',confirmText:App.t('confirm_payment_btn'),
       onConfirm:async()=>{
         const doc=_db.collection(COL.SUBSCRIPTIONS).doc(id);
         const snap=await doc.get(); const d=snap.data();
-        await doc.update({amountPaid:(d.totalAmount||0)});
-        Toast.success('Payment recorded!'); await loadData();
+        await doc.update({amountPaid:(d.totalAmount||0), paymentMethod:'paid'});
+        await logActivity(_db,'payment_recorded',{subscriber:d.subscriberName,subscriberId:d.subscriberId,sport:d.sportName,amount:remaining});
+        Toast.success(App.t('payment_recorded')); await loadData();
       }
     });
   }
 
-  function del(id){Modal.confirm({title:'Delete',message:App.t('delete_confirm'),type:'danger',confirmText:App.t('delete'),onConfirm:async()=>{await _db.collection(COL.SUBSCRIPTIONS).doc(id).delete();Toast.success(App.t('deleted'));await loadData();}});}
+  function del(id){
+    const s=_all.find(x=>x.id===id);
+    Modal.confirm({title:App.t('delete'),message:App.t('delete_confirm'),type:'danger',confirmText:App.t('delete'),onConfirm:async()=>{
+      await _db.collection(COL.SUBSCRIPTIONS).doc(id).delete();
+      if(s) await logActivity(_db,'subscription_deleted',{subscriber:s.subscriberName,subscriberId:s.subscriberId,sport:s.sportName});
+      Toast.success(App.t('deleted'));await loadData();
+    }});
+  }
 
-  return {render,openNew,save,payRemaining,del,onSearch,onFilter,goPage};
+  return {render,openNew,openEdit,save,payRemaining,del,onSearch,onFilter,goPage,
+           onSubscriberSearch,selectSubscriber,hideSubscriberDropdown,
+           showSearchSuggestions,hideSearchSuggestions,selectSearchTerm};
 })();

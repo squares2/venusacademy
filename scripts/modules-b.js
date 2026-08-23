@@ -12,7 +12,7 @@ const POSModule = (() => {
       <div class="page-header">
         <div class="page-header-left">
           <h1 class="page-title">${t('pos')}</h1>
-          <p class="page-subtitle">Sell products to gym members</p>
+          <p class="page-subtitle">${t('pos_subtitle')}</p>
         </div>
         <div class="page-header-right">
           <button class="btn btn-outline" onclick="POSModule.openInventory()">📦 ${t('inventory')}</button>
@@ -23,16 +23,16 @@ const POSModule = (() => {
           <div class="search-bar">
             <div class="search-input-wrap">
               <span class="search-icon">🔍</span>
-              <input class="search-input" id="pos-search" placeholder="Search products…" oninput="POSModule.onSearch(this.value)">
+              <input class="search-input" id="pos-search" placeholder="${t('search_products_placeholder')}" oninput="POSModule.onSearch(this.value)">
             </div>
             <select class="filter-select" id="pos-category" onchange="POSModule.onCat()">
-              <option value="">All Categories</option>
-              <option value="water">💧 Water</option>
-              <option value="food">🍎 Food</option>
-              <option value="supplement">💊 Supplements</option>
-              <option value="gear">🥊 Gear</option>
-              <option value="apparel">👕 Apparel</option>
-              <option value="other">📦 Other</option>
+              <option value="">${t('all_categories')}</option>
+              <option value="water">💧 ${t('cat_water')}</option>
+              <option value="food">🍎 ${t('cat_food')}</option>
+              <option value="supplement">💊 ${t('cat_supplement')}</option>
+              <option value="gear">🥊 ${t('cat_gear')}</option>
+              <option value="apparel">👕 ${t('cat_apparel')}</option>
+              <option value="other">📦 ${t('cat_other')}</option>
             </select>
           </div>
           <div class="pos-products-grid" id="pos-products"></div>
@@ -41,18 +41,18 @@ const POSModule = (() => {
           <div class="pos-cart">
             <div class="pos-cart-header">
               🛒 ${t('cart')}
-              <button class="btn btn-ghost btn-sm" onclick="POSModule.clearCart()">Clear</button>
+              <button class="btn btn-ghost btn-sm" onclick="POSModule.clearCart()">${t('clear_btn')}</button>
             </div>
             <div class="pos-cart-items" id="cart-items">
               <p style="text-align:center;color:var(--text-muted);padding:30px 0;font-size:13px">${t('empty_cart')}</p>
             </div>
             <div class="pos-cart-summary">
-              <div class="summary-row"><span>Subtotal (USD)</span><span id="cart-subtotal-usd">$0.00</span></div>
-              <div class="summary-row"><span>Subtotal (LBP)</span><span id="cart-subtotal-lbp">0 ل.ل</span></div>
+              <div class="summary-row"><span>${t('subtotal_usd')}</span><span id="cart-subtotal-usd">$0.00</span></div>
+              <div class="summary-row"><span>${t('subtotal_lbp')}</span><span id="cart-subtotal-lbp">0 ل.ل</span></div>
               <div class="summary-row total"><span>${t('total')}</span><span class="amount" id="cart-total">$0.00</span></div>
               <div class="form-group" style="margin-top:10px">
-                <label class="form-label">Customer (optional)</label>
-                <input class="form-input" id="pos-customer" placeholder="Name or phone">
+                <label class="form-label">${t('customer_optional')}</label>
+                <input class="form-input" id="pos-customer" placeholder="${t('name_or_phone_placeholder')}">
               </div>
               <div class="form-group">
                 <label class="form-label">${t('payment_method')}</label>
@@ -88,11 +88,12 @@ const POSModule = (() => {
         <div class="pos-product-emoji">${catIcon(p.category)}</div>
         <div class="pos-product-name">${p.name}</div>
         <div class="pos-product-price">${Currency.formatUSD(p.priceUsd)}</div>
-        <div class="pos-product-stock">Stock: ${p.stock??'∞'}</div>
+        <div class="pos-product-stock">${App.t('stock')}: ${p.stock??'∞'}</div>
       </div>`).join('');
   }
 
   function catIcon(c){return{water:'💧',food:'🍎',supplement:'💊',gear:'🥊',apparel:'👕'}[c]||'📦';}
+  function catLabel(c){return App.t({water:'cat_water',food:'cat_food',supplement:'cat_supplement',gear:'cat_gear',apparel:'cat_apparel'}[c]||'cat_other');}
 
   const onSearch = debounce(v => {
     const q=v.toLowerCase(); const cat=document.getElementById('pos-category')?.value;
@@ -148,7 +149,7 @@ const POSModule = (() => {
     const paid=Number(document.getElementById('pos-paid')?.value)||0;
     const change=paid-total;
     const el=document.getElementById('pos-change');
-    if(el){if(paid>0&&change>=0){el.style.display='block';el.textContent=`Change: ${Currency.formatUSD(change)}`;}else{el.style.display='none';}}
+    if(el){if(paid>0&&change>=0){el.style.display='block';el.textContent=`${App.t('change_word')}: ${Currency.formatUSD(change)}`;}else{el.style.display='none';}}
   }
 
   async function checkout(){
@@ -171,7 +172,7 @@ const POSModule = (() => {
         }
       });
       await batch.commit();
-      Toast.success('Sale completed! 🎉');
+      Toast.success(App.t('sale_completed'));
       clearCart();
       document.getElementById('pos-customer').value='';
       await loadProducts();
@@ -182,31 +183,31 @@ const POSModule = (() => {
     return `<div class="modal-overlay" id="modal-inventory">
       <div class="modal modal-lg">
         <div class="modal-header">
-          <span class="modal-title">📦 Inventory Manager</span>
+          <span class="modal-title">${App.t('inventory_manager_title')}</span>
           <button class="modal-close" onclick="Modal.close('modal-inventory')">✕</button>
         </div>
         <div class="modal-body">
           <div class="flex gap-2" style="margin-bottom:16px;justify-content:flex-end">
-            <button class="btn btn-primary btn-sm" onclick="POSModule.openAddProduct()">+ Add Product</button>
+            <button class="btn btn-primary btn-sm" onclick="POSModule.openAddProduct()">${App.t('add_product_btn')}</button>
           </div>
           <div id="inv-list"></div>
           <div class="modal-overlay" id="modal-product" style="z-index:600">
             <div class="modal modal-sm">
               <div class="modal-header">
-                <span class="modal-title" id="prod-modal-title">Add Product</span>
+                <span class="modal-title" id="prod-modal-title">${App.t('add_product_title')}</span>
                 <button class="modal-close" onclick="Modal.close('modal-product')">✕</button>
               </div>
               <div class="modal-body">
-                <div class="form-group"><label class="form-label">Name <span class="required">*</span></label><input class="form-input" id="pf-name"><div class="form-error-msg"></div></div>
+                <div class="form-group"><label class="form-label">${App.t('name_generic')} <span class="required">*</span></label><input class="form-input" id="pf-name"><div class="form-error-msg"></div></div>
                 <div class="form-row">
-                  <div class="form-group"><label class="form-label">Price (USD) <span class="required">*</span></label><input class="form-input" id="pf-price" type="number" min="0"><div class="form-error-msg"></div></div>
+                  <div class="form-group"><label class="form-label">${App.t('price_usd')} <span class="required">*</span></label><input class="form-input" id="pf-price" type="number" min="0"><div class="form-error-msg"></div></div>
                   <div class="form-group"><label class="form-label">${App.t('stock')}</label><input class="form-input" id="pf-stock" type="number" min="0"></div>
                 </div>
                 <div class="form-group"><label class="form-label">${App.t('category')}</label>
                   <select class="form-select" id="pf-cat">
-                    <option value="water">💧 Water</option><option value="food">🍎 Food</option>
-                    <option value="supplement">💊 Supplement</option><option value="gear">🥊 Gear</option>
-                    <option value="apparel">👕 Apparel</option><option value="other">📦 Other</option>
+                    <option value="water">💧 ${App.t('cat_water')}</option><option value="food">🍎 ${App.t('cat_food')}</option>
+                    <option value="supplement">💊 ${App.t('cat_supplement')}</option><option value="gear">🥊 ${App.t('cat_gear')}</option>
+                    <option value="apparel">👕 ${App.t('cat_apparel')}</option><option value="other">📦 ${App.t('cat_other')}</option>
                   </select>
                 </div>
               </div>
@@ -217,7 +218,7 @@ const POSModule = (() => {
             </div>
           </div>
         </div>
-        <div class="modal-footer"><button class="btn btn-ghost" onclick="Modal.close('modal-inventory')">Close</button></div>
+        <div class="modal-footer"><button class="btn btn-ghost" onclick="Modal.close('modal-inventory')">${App.t('close')}</button></div>
       </div>
     </div>`;
   }
@@ -230,19 +231,19 @@ const POSModule = (() => {
   function renderInventoryList(){
     const el=document.getElementById('inv-list');
     if(!el)return;
-    el.innerHTML=`<table style="width:100%"><thead><tr><th>Name</th><th>Category</th><th>Price</th><th>Stock</th><th>Actions</th></tr></thead><tbody>${
-      _products.map(p=>`<tr><td>${p.name}</td><td>${catIcon(p.category)} ${p.category}</td><td>${Currency.formatUSD(p.priceUsd)}</td><td>${p.stock??'∞'}</td><td><button class="btn btn-danger btn-sm" onclick="POSModule.delProduct('${p.id}','${p.name.replace(/'/g,"\\'")}')">🗑</button></td></tr>`).join('')
+    el.innerHTML=`<table style="width:100%"><thead><tr><th>${App.t('name_generic')}</th><th>${App.t('category')}</th><th>${App.t('price_generic')}</th><th>${App.t('stock')}</th><th>${App.t('actions')}</th></tr></thead><tbody>${
+      _products.map(p=>`<tr><td>${p.name}</td><td>${catIcon(p.category)} ${catLabel(p.category)}</td><td>${Currency.formatUSD(p.priceUsd)}</td><td>${p.stock??'∞'}</td><td><button class="btn btn-danger btn-sm" onclick="POSModule.delProduct('${p.id}','${p.name.replace(/'/g,"\\'")}')">🗑</button></td></tr>`).join('')
     }</tbody></table>`;
   }
-  function openAddProduct(){_editProdId=null;['pf-name','pf-price','pf-stock'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});document.getElementById('prod-modal-title').textContent='Add Product';Modal.open('modal-product');}
+  function openAddProduct(){_editProdId=null;['pf-name','pf-price','pf-stock'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});document.getElementById('prod-modal-title').textContent=App.t('add_product_title');Modal.open('modal-product');}
   async function saveProduct(){
-    if(!Validate.form([{id:'pf-name',rules:['required'],label:'Name'},{id:'pf-price',rules:['required'],label:'Price'}]))return;
+    if(!Validate.form([{id:'pf-name',rules:['required'],label:App.t('name_generic')},{id:'pf-price',rules:['required'],label:App.t('price_generic')}]))return;
     const data={name:document.getElementById('pf-name').value.trim(),priceUsd:Number(document.getElementById('pf-price').value)||0,stock:Number(document.getElementById('pf-stock').value)||null,category:document.getElementById('pf-cat').value,updatedAt:firebase.firestore.FieldValue.serverTimestamp()};
     if(!_editProdId){data.createdAt=firebase.firestore.FieldValue.serverTimestamp();await _db.collection(COL.PRODUCTS).add(data);}
     else{await _db.collection(COL.PRODUCTS).doc(_editProdId).update(data);}
     Toast.success(App.t('saved'));Modal.close('modal-product');await loadProducts();renderInventoryList();
   }
-  function delProduct(id,name){Modal.confirm({title:'Delete Product',message:`Delete <strong>${name}</strong>?`,type:'danger',confirmText:'Delete',onConfirm:async()=>{await _db.collection(COL.PRODUCTS).doc(id).delete();await loadProducts();renderInventoryList();Toast.success(App.t('deleted'));}});}
+  function delProduct(id,name){Modal.confirm({title:App.t('delete_product_title'),message:`${App.t('delete_confirm')}<br><strong>${name}</strong>`,type:'danger',confirmText:App.t('delete'),onConfirm:async()=>{await _db.collection(COL.PRODUCTS).doc(id).delete();await loadProducts();renderInventoryList();Toast.success(App.t('deleted'));}});}
 
   return {render,addToCart,updateQty,clearCart,calcChange,checkout,onSearch,onCat,openInventory,openAddProduct,saveProduct,delProduct};
 })();
@@ -262,14 +263,14 @@ const ReportsModule = (() => {
       <div class="page-header">
         <div class="page-header-left">
           <h1 class="page-title">${t('reports')}</h1>
-          <p class="page-subtitle">Financial overview & analytics</p>
+          <p class="page-subtitle">${t('reports_subtitle')}</p>
         </div>
         <div class="page-header-right">
           <select class="filter-select" id="rep-period" onchange="ReportsModule.loadReports()">
-            <option value="month">This Month</option>
-            <option value="3month">Last 3 Months</option>
-            <option value="year">This Year</option>
-            <option value="all">All Time</option>
+            <option value="month">${t('period_this_month')}</option>
+            <option value="3month">${t('period_last_3_months')}</option>
+            <option value="year">${t('period_this_year')}</option>
+            <option value="all">${t('period_all_time')}</option>
           </select>
         </div>
       </div>
@@ -288,18 +289,21 @@ const ReportsModule = (() => {
     else fromDate = new Date(2000, 0, 1);
 
     try {
-      const [subSnap, coSnap, subScSnap, salesSnap] = await Promise.all([
+      const [subSnap, coSnap, subScSnap, salesSnap, courseSnap] = await Promise.all([
         _db.collection(COL.SUBSCRIBERS).get(),
         _db.collection(COL.COACHES).get(),
         _db.collection(COL.SUBSCRIPTIONS).get(),
         _db.collection(COL.SALES).get(),
+        _db.collection(COL.COURSES).get(),
       ]);
 
       const subs = subScSnap.docs.map(d=>({id:d.id,...d.data()}));
       const sales = salesSnap.docs.map(d=>({id:d.id,...d.data()}));
+      const courses = courseSnap.docs.map(d=>({id:d.id,...d.data()}));
 
       const periodSubs = subs.filter(s=>s.createdAt?.toDate?.()>=fromDate);
       const periodSales = sales.filter(s=>s.createdAt?.toDate?.()>=fromDate);
+      const periodCourses = courses.filter(c=>c.createdAt?.toDate?.()>=fromDate);
 
       const revenue = periodSubs.reduce((t,s)=>t+(s.amountPaid||0),0);
       const salesRev = periodSales.reduce((t,s)=>t+(s.totalUsd||0),0);
@@ -307,14 +311,41 @@ const ReportsModule = (() => {
       const expiring = subs.filter(s=>DateUtil.isExpiringSoon(s.endDate,7)).length;
       const coaches = coSnap.size;
 
+      // Courses financials
+      const courseStatusOf = c => {
+        const today = DateUtil.today();
+        if (c.endDate && c.endDate < today) return 'completed';
+        if (c.startDate && c.startDate > today) return 'upcoming';
+        return 'active';
+      };
+      const courseStats = periodCourses.map(c=>{
+        const members = c.members||[], coachesArr = c.coaches||[], expenses = c.expenses||[];
+        const collected = members.reduce((t,m)=>t+(m.amountPaid||0),0);
+        const expected = members.reduce((t,m)=>t+(m.fee??c.price??0),0);
+        const coachCost = coachesArr.reduce((t,x)=>t+(x.cost||0),0);
+        const expenseTotal = expenses.reduce((t,e)=>t+(e.amount||0),0);
+        return {
+          id:c.id, name:c.name||'—', memberCount:members.length,
+          collected, expected, coachCost, expenseTotal,
+          net: collected - coachCost - expenseTotal,
+        };
+      });
+      const courseRevenue = courseStats.reduce((t,c)=>t+c.collected,0);
+      const courseCoachCost = courseStats.reduce((t,c)=>t+c.coachCost,0);
+      const courseExpenseTotal = courseStats.reduce((t,c)=>t+c.expenseTotal,0);
+      const courseNetProfit = courseRevenue - courseCoachCost - courseExpenseTotal;
+      const activeCourses = courses.filter(c=>courseStatusOf(c)!=='completed').length;
+
       // KPIs
       document.getElementById('rep-kpis').innerHTML = [
-        {icon:'💰',value:Currency.formatUSD(revenue),label:'Subscription Revenue',change:''},
-        {icon:'🛒',value:Currency.formatUSD(salesRev),label:'POS Revenue',change:''},
-        {icon:'💵',value:Currency.formatUSD(revenue+salesRev),label:'Total Revenue',change:''},
-        {icon:'👥',value:active,label:'Active Subscriptions',change:''},
-        {icon:'⚠️',value:expiring,label:'Expiring This Week',change:''},
-        {icon:'🏋️',value:coaches,label:'Total Coaches',change:''},
+        {icon:'💰',value:Currency.formatUSD(revenue),label:App.t('subscription_revenue'),change:''},
+        {icon:'🛒',value:Currency.formatUSD(salesRev),label:App.t('pos_revenue'),change:''},
+        {icon:'🎓',value:Currency.formatUSD(courseRevenue),label:App.t('courses_revenue'),change:''},
+        {icon:'💵',value:Currency.formatUSD(revenue+salesRev+courseRevenue),label:App.t('total_revenue'),change:''},
+        {icon:'👥',value:active,label:App.t('active_subs'),change:''},
+        {icon:'📚',value:activeCourses,label:App.t('active_courses_lbl'),change:''},
+        {icon:'⚠️',value:expiring,label:App.t('expiring_soon_lbl'),change:''},
+        {icon:'🏋️',value:coaches,label:App.t('total_coaches'),change:''},
       ].map(k=>`
         <div class="kpi-card">
           <div class="kpi-icon">${k.icon}</div>
@@ -345,47 +376,86 @@ const ReportsModule = (() => {
       document.getElementById('rep-charts').innerHTML = `
         <div class="chart-card">
           <div class="chart-card-header">
-            <div><div class="chart-title">Revenue by Sport</div><div class="chart-subtitle">All time</div></div>
+            <div><div class="chart-title">${App.t('revenue_by_sport')}</div><div class="chart-subtitle">${App.t('all_time_word')}</div></div>
           </div>
           ${sportList.map(s=>`
             <div class="rev-bar-row">
               <span class="rev-bar-label">${s.name}</span>
               <div class="rev-bar-track"><div class="rev-bar-fill" style="width:${Math.round(s.revenue/maxRev*100)}%"></div></div>
               <span class="rev-bar-value">${Currency.formatUSD(s.revenue)}</span>
-            </div>`).join('')||'<p class="text-muted text-sm">No data</p>'}
+            </div>`).join('')||`<p class="text-muted text-sm">${App.t('no_data')}</p>`}
         </div>
         <div class="chart-card">
           <div class="chart-card-header">
-            <div><div class="chart-title">Coach Commissions</div><div class="chart-subtitle">Due this period</div></div>
+            <div><div class="chart-title">${App.t('coach_commissions')}</div><div class="chart-subtitle">${App.t('due_this_period')}</div></div>
           </div>
           ${coachList.length?`
           <div class="table-scroll">
           <table class="commission-table" style="width:100%">
-            <thead><tr><th>Coach</th><th>Subscribers</th><th>Revenue</th><th>Commission %</th><th>Commission $</th></tr></thead>
+            <thead><tr><th>${App.t('coach')}</th><th>${App.t('subscribers_col')}</th><th>${App.t('revenue_col')}</th><th>${App.t('commission_pct')}</th><th>${App.t('commission_usd')}</th></tr></thead>
             <tbody>${coachList.map(c=>`<tr>
               <td>${c.name}</td><td>${c.subs}</td><td>${Currency.formatUSD(c.revenue)}</td>
               <td>${c.commission}%</td><td>${Currency.formatUSD(c.revenue*c.commission/100)}</td>
             </tr>`).join('')}</tbody>
-          </table></div>`:'<p class="text-muted text-sm">No coach assignments</p>'}
+          </table></div>`:`<p class="text-muted text-sm">${App.t('no_coach_assignments')}</p>`}
         </div>
         <div class="chart-card">
           <div class="chart-card-header">
-            <div><div class="chart-title">Subscription Status</div></div>
+            <div><div class="chart-title">${App.t('subscription_status_title')}</div></div>
           </div>
           ${['active','expiring','expired'].map(st=>{
             const count=subs.filter(s=>{if(st==='active')return !DateUtil.isExpired(s.endDate)&&!DateUtil.isExpiringSoon(s.endDate,7);if(st==='expiring')return DateUtil.isExpiringSoon(s.endDate,7);return DateUtil.isExpired(s.endDate);}).length;
             const colors={active:'var(--success)',expiring:'var(--warning)',expired:'var(--danger)'};
-            return `<div class="rev-bar-row"><span class="rev-bar-label" style="color:${colors[st]}">${st.charAt(0).toUpperCase()+st.slice(1)}</span><div class="rev-bar-track"><div class="rev-bar-fill" style="width:${subs.length?Math.round(count/subs.length*100):0}%;background:${colors[st]}"></div></div><span class="rev-bar-value" style="color:${colors[st]}">${count}</span></div>`;
+            const labels={active:App.t('active'),expiring:App.t('expiring_soon'),expired:App.t('expired')};
+            return `<div class="rev-bar-row"><span class="rev-bar-label" style="color:${colors[st]}">${labels[st]}</span><div class="rev-bar-track"><div class="rev-bar-fill" style="width:${subs.length?Math.round(count/subs.length*100):0}%;background:${colors[st]}"></div></div><span class="rev-bar-value" style="color:${colors[st]}">${count}</span></div>`;
           }).join('')}
         </div>
         <div class="chart-card">
-          <div class="chart-card-header"><div><div class="chart-title">POS Sales Summary</div></div></div>
-          <div class="detail-row"><span class="detail-label">Total Transactions</span><span class="detail-value">${periodSales.length}</span></div>
-          <div class="detail-row"><span class="detail-label">Total Revenue</span><span class="detail-value" style="color:var(--gold-400)">${Currency.formatUSD(salesRev)}</span></div>
-          <div class="detail-row"><span class="detail-label">Avg. per Sale</span><span class="detail-value">${Currency.formatUSD(periodSales.length?salesRev/periodSales.length:0)}</span></div>
+          <div class="chart-card-header"><div><div class="chart-title">${App.t('pos_sales_summary')}</div></div></div>
+          <div class="detail-row"><span class="detail-label">${App.t('total_transactions')}</span><span class="detail-value">${periodSales.length}</span></div>
+          <div class="detail-row"><span class="detail-label">${App.t('total_revenue')}</span><span class="detail-value" style="color:var(--gold-400)">${Currency.formatUSD(salesRev)}</span></div>
+          <div class="detail-row"><span class="detail-label">${App.t('avg_per_sale')}</span><span class="detail-value">${Currency.formatUSD(periodSales.length?salesRev/periodSales.length:0)}</span></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-header">
+            <div><div class="chart-title">${App.t('revenue_mix_title')}</div><div class="chart-subtitle">${{month:App.t('period_this_month'),'3month':App.t('period_last_3_months'),year:App.t('period_this_year'),all:App.t('period_all_time')}[period]}</div></div>
+          </div>
+          ${(()=>{
+            const mixMax = Math.max(revenue, salesRev, courseRevenue, 1);
+            const mix = [
+              {label:App.t('subscription_revenue'), val:revenue, color:'var(--gold-400)'},
+              {label:App.t('pos_revenue'), val:salesRev, color:'var(--info)'},
+              {label:App.t('courses_revenue'), val:courseRevenue, color:'var(--success)'},
+            ];
+            return mix.map(m=>`
+              <div class="rev-bar-row">
+                <span class="rev-bar-label">${m.label}</span>
+                <div class="rev-bar-track"><div class="rev-bar-fill" style="width:${Math.round(m.val/mixMax*100)}%;background:${m.color}"></div></div>
+                <span class="rev-bar-value">${Currency.formatUSD(m.val)}</span>
+              </div>`).join('');
+          })()}
+          <div class="detail-row" style="margin-top:10px;border-top:1px solid var(--border-subtle);padding-top:10px">
+            <span class="detail-label">${App.t('total_revenue')}</span>
+            <span class="detail-value" style="color:var(--gold-400);font-weight:700">${Currency.formatUSD(revenue+salesRev+courseRevenue)}</span>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-header"><div><div class="chart-title">${App.t('courses_performance_title')}</div><div class="chart-subtitle">${App.t('due_this_period')}</div></div></div>
+          <div class="detail-row"><span class="detail-label">${App.t('courses_collected')}</span><span class="detail-value" style="color:var(--success)">${Currency.formatUSD(courseRevenue)}</span></div>
+          <div class="detail-row"><span class="detail-label">${App.t('coach_cost_expenses')}</span><span class="detail-value" style="color:var(--warning)">${Currency.formatUSD(courseCoachCost+courseExpenseTotal)}</span></div>
+          <div class="detail-row"><span class="detail-label">${App.t('net_profit')}</span><span class="detail-value" style="color:${courseNetProfit>=0?'var(--success)':'var(--danger)'};font-weight:700">${Currency.formatUSD(courseNetProfit)}</span></div>
+          ${courseStats.length?`
+          <div class="table-scroll" style="margin-top:14px">
+          <table class="commission-table" style="width:100%">
+            <thead><tr><th>${App.t('course_word')}</th><th>${App.t('tab_members')}</th><th>${App.t('collected')}</th><th>${App.t('net_col')}</th></tr></thead>
+            <tbody>${courseStats.sort((a,b)=>b.net-a.net).map(c=>`<tr>
+              <td>${c.name}</td><td>${c.memberCount}</td><td>${Currency.formatUSD(c.collected)}</td>
+              <td style="color:${c.net>=0?'var(--success)':'var(--danger)'}">${Currency.formatUSD(c.net)}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>`:`<p class="text-muted text-sm" style="margin-top:10px">${App.t('no_courses_data')}</p>`}
         </div>`;
     } catch(e) {
-      document.getElementById('rep-kpis').innerHTML = `<p style="color:var(--danger)">Failed to load reports.</p>`;
+      document.getElementById('rep-kpis').innerHTML = `<p style="color:var(--danger)">${App.t('failed_load_reports')}</p>`;
     }
   }
 
@@ -407,7 +477,7 @@ const DietModule = (() => {
       <div class="page-header">
         <div class="page-header-left">
           <h1 class="page-title">${t('diet')}</h1>
-          <p class="page-subtitle">Assign meal & workout plans to subscribers</p>
+          <p class="page-subtitle">${t('diet_subtitle')}</p>
         </div>
         <div class="page-header-right">
           <button class="btn btn-primary" onclick="DietModule.openNew()">+ ${t('assign_plan')}</button>
@@ -415,7 +485,7 @@ const DietModule = (() => {
       </div>
       <div class="search-bar">
         <div class="search-input-wrap"><span class="search-icon">🔍</span>
-          <input class="search-input" id="diet-search" placeholder="Search by subscriber…" oninput="DietModule.onSearch(this.value)">
+          <input class="search-input" id="diet-search" placeholder="${t('search_by_subscriber')}" oninput="DietModule.onSearch(this.value)">
         </div>
       </div>
       <div id="diet-plans-list"></div>
@@ -447,16 +517,16 @@ const DietModule = (() => {
         </div>
         <div class="plan-section">
           <div>
-            <div class="form-section-title">🥗 Meal Plan</div>
+            <div class="form-section-title">${App.t('meal_plan_title')}</div>
             ${(p.meals||[]).map(m=>`
-              <div class="meal-row"><span class="meal-time">${m.time}</span><span class="meal-name">${m.name}</span><span class="meal-cals">${m.calories||''}${m.calories?' kcal':''}</span></div>
-            `).join('')||'<p class="text-muted text-sm">No meals</p>'}
+              <div class="meal-row"><span class="meal-time">${m.time}</span><span class="meal-name">${m.name}</span><span class="meal-cals">${m.calories||''}${m.calories?' '+App.t('kcal_word'):''}</span></div>
+            `).join('')||`<p class="text-muted text-sm">${App.t('no_meals')}</p>`}
           </div>
           <div>
-            <div class="form-section-title">🏋️ Workout Plan</div>
+            <div class="form-section-title">${App.t('workout_plan_title')}</div>
             ${(p.exercises||[]).map((e,i)=>`
-              <div class="workout-exercise"><div class="exercise-num">${i+1}</div><div class="exercise-info"><div class="exercise-name">${e.name}</div><div class="exercise-sets">${e.sets||0} sets × ${e.reps||0} reps ${e.weight?'@ '+e.weight+'kg':''}</div></div></div>
-            `).join('')||'<p class="text-muted text-sm">No exercises</p>'}
+              <div class="workout-exercise"><div class="exercise-num">${i+1}</div><div class="exercise-info"><div class="exercise-name">${e.name}</div><div class="exercise-sets">${e.sets||0} ${App.t('sets_reps')}${e.reps||0} ${App.t('reps_word')} ${e.weight?'@ '+e.weight+'kg':''}</div></div></div>
+            `).join('')||`<p class="text-muted text-sm">${App.t('no_exercises')}</p>`}
           </div>
         </div>
       </div>`).join('');
@@ -468,24 +538,24 @@ const DietModule = (() => {
     return `<div class="modal-overlay" id="modal-diet">
       <div class="modal modal-xl">
         <div class="modal-header">
-          <span class="modal-title" id="diet-modal-title">Assign Plan</span>
+          <span class="modal-title" id="diet-modal-title">${App.t('assign_plan_title')}</span>
           <button class="modal-close" onclick="Modal.close('modal-diet')">✕</button>
         </div>
         <div class="modal-body">
           <div class="form-row">
-            <div class="form-group"><label class="form-label">Subscriber <span class="required">*</span></label><select class="form-select" id="dp-subscriber"><option value="">Select…</option></select><div class="form-error-msg"></div></div>
-            <div class="form-group"><label class="form-label">Goal</label><input class="form-input" id="dp-goal" placeholder="e.g. Weight Loss, Muscle Gain"></div>
+            <div class="form-group"><label class="form-label">${App.t('subscriber_singular')} <span class="required">*</span></label><select class="form-select" id="dp-subscriber"><option value="">${App.t('select_placeholder')}</option></select><div class="form-error-msg"></div></div>
+            <div class="form-group"><label class="form-label">${App.t('goal_word')}</label><input class="form-input" id="dp-goal" placeholder="${App.t('goal_placeholder')}"></div>
           </div>
           <div class="plan-section" style="margin-top:16px">
             <div>
-              <div class="form-section-title">🥗 Meal Plan</div>
+              <div class="form-section-title">${App.t('meal_plan_title')}</div>
               <div id="meals-list"></div>
-              <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="DietModule.addMeal()">+ Add Meal</button>
+              <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="DietModule.addMeal()">${App.t('add_meal_btn')}</button>
             </div>
             <div>
-              <div class="form-section-title">🏋️ Workout Exercises</div>
+              <div class="form-section-title">${App.t('workout_exercises_title')}</div>
               <div id="exercises-list"></div>
-              <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="DietModule.addExercise()">+ Add Exercise</button>
+              <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="DietModule.addExercise()">${App.t('add_exercise_btn')}</button>
             </div>
           </div>
           <div class="form-row cols-1" style="margin-top:16px">
@@ -507,8 +577,8 @@ const DietModule = (() => {
     el.innerHTML=_meals.map((m,i)=>`
       <div class="flex gap-2" style="margin-bottom:8px;flex-wrap:wrap">
         <input class="form-input" style="width:80px" value="${m.time}" placeholder="08:00" oninput="_dietMeals[${i}].time=this.value">
-        <input class="form-input" style="flex:1;min-width:120px" value="${m.name}" placeholder="Meal name" oninput="_dietMeals[${i}].name=this.value">
-        <input class="form-input" style="width:80px" value="${m.calories||''}" placeholder="kcal" type="number" oninput="_dietMeals[${i}].calories=Number(this.value)">
+        <input class="form-input" style="flex:1;min-width:120px" value="${m.name}" placeholder="${App.t('meal_name_placeholder')}" oninput="_dietMeals[${i}].name=this.value">
+        <input class="form-input" style="width:80px" value="${m.calories||''}" placeholder="${App.t('kcal_word')}" type="number" oninput="_dietMeals[${i}].calories=Number(this.value)">
         <button class="btn btn-danger btn-sm btn-icon" onclick="DietModule.removeMeal(${i})">✕</button>
       </div>`).join('');
     window._dietMeals=_meals;
@@ -521,9 +591,9 @@ const DietModule = (() => {
     if(!el)return;
     el.innerHTML=_exercises.map((e,i)=>`
       <div class="flex gap-2" style="margin-bottom:8px;flex-wrap:wrap">
-        <input class="form-input" style="flex:1;min-width:100px" value="${e.name}" placeholder="Exercise" oninput="_dietEx[${i}].name=this.value">
-        <input class="form-input" style="width:60px" value="${e.sets||''}" placeholder="Sets" type="number" oninput="_dietEx[${i}].sets=Number(this.value)">
-        <input class="form-input" style="width:60px" value="${e.reps||''}" placeholder="Reps" type="number" oninput="_dietEx[${i}].reps=Number(this.value)">
+        <input class="form-input" style="flex:1;min-width:100px" value="${e.name}" placeholder="${App.t('exercise_placeholder')}" oninput="_dietEx[${i}].name=this.value">
+        <input class="form-input" style="width:60px" value="${e.sets||''}" placeholder="${App.t('sets_placeholder')}" type="number" oninput="_dietEx[${i}].sets=Number(this.value)">
+        <input class="form-input" style="width:60px" value="${e.reps||''}" placeholder="${App.t('reps_placeholder')}" type="number" oninput="_dietEx[${i}].reps=Number(this.value)">
         <input class="form-input" style="width:70px" value="${e.weight||''}" placeholder="kg" type="number" oninput="_dietEx[${i}].weight=Number(this.value)">
         <button class="btn btn-danger btn-sm btn-icon" onclick="DietModule.removeExercise(${i})">✕</button>
       </div>`).join('');
@@ -534,7 +604,7 @@ const DietModule = (() => {
 
   function openNew(){
     _editId=null; _meals=[]; _exercises=[];
-    document.getElementById('diet-modal-title').textContent='Assign Plan';
+    document.getElementById('diet-modal-title').textContent=App.t('assign_plan_title');
     document.getElementById('dp-subscriber').value='';
     document.getElementById('dp-goal').value='';
     document.getElementById('dp-notes').value='';
@@ -546,7 +616,7 @@ const DietModule = (() => {
     _editId=id;
     const doc=await _db.collection(COL.DIET_PLANS).doc(id).get();
     const d=doc.data(); _meals=[...(d.meals||[])]; _exercises=[...(d.exercises||[])];
-    document.getElementById('diet-modal-title').textContent='Edit Plan';
+    document.getElementById('diet-modal-title').textContent=App.t('edit_plan_title');
     document.getElementById('dp-subscriber').value=d.subscriberId||'';
     document.getElementById('dp-goal').value=d.goal||'';
     document.getElementById('dp-notes').value=d.notes||'';
@@ -555,7 +625,7 @@ const DietModule = (() => {
   }
 
   async function save(){
-    if(!Validate.form([{id:'dp-subscriber',rules:['required'],label:'Subscriber'}]))return;
+    if(!Validate.form([{id:'dp-subscriber',rules:['required'],label:App.t('subscriber_singular')}]))return;
     const subId=document.getElementById('dp-subscriber').value;
     const sub=_subscribers.find(s=>s.id===subId);
     const data={subscriberId:subId,subscriberName:sub?.name||'',goal:document.getElementById('dp-goal').value.trim(),notes:document.getElementById('dp-notes').value.trim(),meals:window._dietMeals||_meals,exercises:window._dietEx||_exercises,updatedAt:firebase.firestore.FieldValue.serverTimestamp()};
@@ -566,7 +636,7 @@ const DietModule = (() => {
     }catch(e){Toast.error(App.t('error_generic'));}
   }
 
-  function del(id){Modal.confirm({title:'Delete Plan',message:App.t('delete_confirm'),type:'danger',confirmText:App.t('delete'),onConfirm:async()=>{await _db.collection(COL.DIET_PLANS).doc(id).delete();Toast.success(App.t('deleted'));await loadPlans();}});}
+  function del(id){Modal.confirm({title:App.t('delete_plan_title'),message:App.t('delete_confirm'),type:'danger',confirmText:App.t('delete'),onConfirm:async()=>{await _db.collection(COL.DIET_PLANS).doc(id).delete();Toast.success(App.t('deleted'));await loadPlans();}});}
 
   return {render,openNew,openEdit,save,del,onSearch,addMeal,removeMeal,addExercise,removeExercise};
 })();
@@ -586,7 +656,7 @@ const UsersModule = (() => {
       <div class="page-header">
         <div class="page-header-left">
           <h1 class="page-title">${t('user_mgmt')}</h1>
-          <p class="page-subtitle">Manage all system users and their roles</p>
+          <p class="page-subtitle">${t('users_subtitle')}</p>
         </div>
         <div class="page-header-right">
           <button class="btn btn-primary" onclick="UsersModule.openCreate()">+ ${t('create_user')}</button>
@@ -596,8 +666,8 @@ const UsersModule = (() => {
         <div class="table-scroll">
           <table>
             <thead><tr>
-              <th>#</th><th>Name</th><th>Email</th><th>${t('role')}</th>
-              <th>Created</th><th>Status</th><th>${t('actions')}</th>
+              <th>#</th><th>${t('name_generic')}</th><th>${t('email_lbl')}</th><th>${t('role')}</th>
+              <th>${t('created_col')}</th><th>${t('status_lbl')}</th><th>${t('actions')}</th>
             </tr></thead>
             <tbody id="users-tbody"><tr><td colspan="7" class="table-empty">${t('loading')}</td></tr></tbody>
           </table>
@@ -619,7 +689,7 @@ const UsersModule = (() => {
       const created=DateUtil.format(u.createdAt?.toDate?.()?.toISOString?.()?.split('T')[0]);
       const esc=name.replace(/'/g,"\\'");
       const toggleBtn=u.role!=='super_admin'
-        ?`<button class="btn btn-${isActive?'danger':'success'} btn-sm" onclick="UsersModule.toggleActive('${u.id}','${isActive}','${esc}')">${isActive?'🚫 Disable':'✓ Enable'}</button>`
+        ?`<button class="btn btn-${isActive?'danger':'success'} btn-sm" onclick="UsersModule.toggleActive('${u.id}','${isActive}','${esc}')">${isActive?'🚫 '+App.t('disable_btn'):'✓ '+App.t('enable_btn')}</button>`
         :'';
       return `<tr>
         <td class="dt-only" style="color:var(--text-muted)">${i+1}</td>
@@ -627,7 +697,7 @@ const UsersModule = (() => {
         <td class="dt-only" style="font-size:12px">${u.email||'—'}</td>
         <td class="dt-only"><span class="badge ${roleColor}">${App.t(u.role)||u.role}</span></td>
         <td class="dt-only" style="font-size:12px">${created}</td>
-        <td class="dt-only"><span class="badge ${isActive?'badge-active':'badge-expired'}">${isActive?App.t('active'):'Inactive'}</span></td>
+        <td class="dt-only"><span class="badge ${isActive?'badge-active':'badge-expired'}">${isActive?App.t('active'):App.t('inactive_status')}</span></td>
         <td class="dt-only"><div class="flex gap-2">
           <button class="btn btn-outline btn-sm" onclick="UsersModule.openEdit('${u.id}')">✏️</button>
           ${toggleBtn}
@@ -643,11 +713,11 @@ const UsersModule = (() => {
               <span class="badge ${roleColor}">${App.t(u.role)||u.role}</span>
             </div>
             <div class="mobile-card-body">
-              <div class="mobile-card-row"><span>Status</span><span class="badge ${isActive?'badge-active':'badge-expired'}">${isActive?'Active':'Inactive'}</span></div>
-              <div class="mobile-card-row"><span>Created</span><span>${created}</span></div>
+              <div class="mobile-card-row"><span>${App.t('status_lbl')}</span><span class="badge ${isActive?'badge-active':'badge-expired'}">${isActive?App.t('active'):App.t('inactive_status')}</span></div>
+              <div class="mobile-card-row"><span>${App.t('created_col')}</span><span>${created}</span></div>
             </div>
             <div class="mobile-card-actions">
-              <button class="btn btn-outline btn-sm" onclick="UsersModule.openEdit('${u.id}')">✏️ Edit</button>
+              <button class="btn btn-outline btn-sm" onclick="UsersModule.openEdit('${u.id}')">✏️ ${App.t('edit')}</button>
               ${toggleBtn}
             </div>
           </div>
@@ -665,12 +735,12 @@ const UsersModule = (() => {
           <button class="modal-close" onclick="Modal.close('modal-user')">✕</button>
         </div>
         <div class="modal-body">
-          <div class="form-group"><label class="form-label">Full Name <span class="required">*</span></label><input class="form-input" id="uf-name"><div class="form-error-msg"></div></div>
-          <div class="form-group"><label class="form-label">Email <span class="required">*</span></label><input class="form-input" id="uf-email" type="email"><div class="form-error-msg"></div></div>
+          <div class="form-group"><label class="form-label">${t('full_name_lbl')} <span class="required">*</span></label><input class="form-input" id="uf-name"><div class="form-error-msg"></div></div>
+          <div class="form-group"><label class="form-label">${t('email_lbl')} <span class="required">*</span></label><input class="form-input" id="uf-email" type="email"><div class="form-error-msg"></div></div>
           <div class="form-group" id="uf-pw-group">
-            <label class="form-label">Password <span class="required">*</span></label>
-            <div class="input-icon-wrap"><input class="form-input" id="uf-password" type="password" placeholder="Min 6 characters"></div>
-            <div class="form-hint">User will use this password to log in.</div>
+            <label class="form-label">${t('password')} <span class="required">*</span></label>
+            <div class="input-icon-wrap"><input class="form-input" id="uf-password" type="password" placeholder="${t('min_6_chars')}"></div>
+            <div class="form-hint">${t('password_hint')}</div>
             <div class="form-error-msg"></div>
           </div>
           <div class="form-group"><label class="form-label">${t('role')} <span class="required">*</span></label>
@@ -721,9 +791,9 @@ const UsersModule = (() => {
     const notice=document.getElementById('uf-notice');
     notice.style.display='none';
     if(!Validate.form([
-      {id:'uf-name',rules:['required'],label:'Name'},
-      {id:'uf-email',rules:['required','email'],label:'Email'},
-      ...(!_editUserId?[{id:'uf-password',rules:['required'],label:'Password'}]:[]),
+      {id:'uf-name',rules:['required'],label:App.t('name_generic')},
+      {id:'uf-email',rules:['required','email'],label:App.t('email_lbl')},
+      ...(!_editUserId?[{id:'uf-password',rules:['required'],label:App.t('password')}]:[]),
     ]))return;
 
     const name=document.getElementById('uf-name').value.trim();
@@ -753,10 +823,10 @@ const UsersModule = (() => {
           active:true, createdAt:firebase.firestore.FieldValue.serverTimestamp(),
         });
         await secondaryAuth.signOut();
-        Toast.success(`User "${name}" created successfully!`);
+        Toast.success(App.t('user_created_success').replace('{name}', name));
         Modal.close('modal-user'); await loadUsers();
       }catch(e){
-        const msgs={'auth/email-already-in-use':'This email is already in use.','auth/weak-password':'Password must be at least 6 characters.'};
+        const msgs={'auth/email-already-in-use':App.t('email_in_use_msg'),'auth/weak-password':App.t('weak_password_msg')};
         notice.textContent=msgs[e.code]||App.t('error_generic');
         notice.style.display='block';
       }
@@ -766,13 +836,13 @@ const UsersModule = (() => {
   async function toggleActive(id, currentlyActive, name){
     const willDisable = currentlyActive==='true';
     Modal.confirm({
-      title: willDisable?'Disable User':'Enable User',
-      message: `${willDisable?'Disable':'Enable'} account for <strong>${name}</strong>?`,
+      title: willDisable?App.t('disable_user_title'):App.t('enable_user_title'),
+      message: `${willDisable?App.t('disable_btn'):App.t('enable_btn')} — <strong>${name}</strong>?`,
       type: willDisable?'danger':'success',
-      confirmText: willDisable?'Disable':'Enable',
+      confirmText: willDisable?App.t('disable_btn'):App.t('enable_btn'),
       onConfirm: async()=>{
         await _db.collection(COL.USERS).doc(id).update({active:!willDisable});
-        Toast.success(`User ${willDisable?'disabled':'enabled'}.`);
+        Toast.success(willDisable?App.t('user_disabled_msg'):App.t('user_enabled_msg'));
         await loadUsers();
       }
     });
@@ -798,8 +868,8 @@ const SettingsModule = (() => {
       </div>
       <div class="settings-layout">
         <div class="settings-nav">
-          ${[['gym','🏋️','Gym Info'],['currency','💰','Currency'],['whatsapp','💬','WhatsApp']].map(([id,icon,label])=>
-            `<div class="settings-nav-item${id==='gym'?' active':''}" onclick="SettingsModule.switchTab('${id}')">${icon} ${label}</div>`
+          ${[['gym','🏋️',t('gym_info_tab')],['currency','💰',t('currency_tab')],['whatsapp','💬',t('whatsapp_tab')]].map(([id,icon,label])=>
+            `<div class="settings-nav-item${id==='gym'?' active':''}" data-tab="${id}" onclick="SettingsModule.switchTab('${id}')">${icon} ${label}</div>`
           ).join('')}
         </div>
         <div id="settings-content"></div>
@@ -809,7 +879,7 @@ const SettingsModule = (() => {
 
   async function switchTab(tab) {
     document.querySelectorAll('.settings-nav-item').forEach(el=>{
-      el.classList.toggle('active', el.textContent.trim().toLowerCase().includes(tab));
+      el.classList.toggle('active', el.dataset.tab === tab);
     });
     const content = document.getElementById('settings-content');
     if(!content)return;
@@ -819,41 +889,41 @@ const SettingsModule = (() => {
       try{const d=await _db.collection(COL.SETTINGS).doc('global').get();if(d.exists)gymData=d.data();}catch(e){}
       content.innerHTML=`
         <div class="settings-card">
-          <div class="settings-card-title">🏋️ Gym Information</div>
-          <div class="form-group"><label class="form-label">Gym Name</label><input class="form-input" id="set-gym-name" value="${gymData.gymName||'Venus Gym'}"></div>
-          <div class="form-group"><label class="form-label">Phone</label><input class="form-input" id="set-gym-phone" value="${gymData.gymPhone||''}"></div>
-          <div class="form-group"><label class="form-label">Address</label><input class="form-input" id="set-gym-address" value="${gymData.gymAddress||''}"></div>
-          <div class="form-group"><label class="form-label">WhatsApp Number</label><input class="form-input" id="set-gym-wa" value="${gymData.whatsappNumber||''}"></div>
-          <button class="btn btn-primary" onclick="SettingsModule.saveGym()">💾 Save</button>
+          <div class="settings-card-title">🏋️ ${App.t('gym_info')}</div>
+          <div class="form-group"><label class="form-label">${App.t('gym_name_lbl')}</label><input class="form-input" id="set-gym-name" value="${gymData.gymName||'Venus Gym'}"></div>
+          <div class="form-group"><label class="form-label">${App.t('phone')}</label><input class="form-input" id="set-gym-phone" value="${gymData.gymPhone||''}"></div>
+          <div class="form-group"><label class="form-label">${App.t('address_generic')}</label><input class="form-input" id="set-gym-address" value="${gymData.gymAddress||''}"></div>
+          <div class="form-group"><label class="form-label">${App.t('whatsapp_number_lbl')}</label><input class="form-input" id="set-gym-wa" value="${gymData.whatsappNumber||''}"></div>
+          <button class="btn btn-primary" onclick="SettingsModule.saveGym()">💾 ${App.t('save')}</button>
         </div>`;
     } else if(tab==='currency'){
       let rate = 89500;
       try{const d=await _db.collection(COL.SETTINGS).doc('global').get();if(d.exists)rate=d.data().dollarRate||89500;}catch(e){}
       content.innerHTML=`
         <div class="settings-card">
-          <div class="settings-card-title">💰 Dollar Rate</div>
+          <div class="settings-card-title">${App.t('dollar_rate_title')}</div>
           <div class="rate-display" style="margin-bottom:20px">
             <div><div class="rate-usd">$1</div><div class="rate-label">USD</div></div>
             <div class="rate-arrow">→</div>
             <div><div class="rate-lbp" id="rate-preview">${Number(rate).toLocaleString()}</div><div class="rate-label">LBP</div></div>
           </div>
           <div class="form-group">
-            <label class="form-label">1 USD = ? LBP <span class="required">*</span></label>
+            <label class="form-label">${App.t('usd_to_lbp_rate_lbl')} <span class="required">*</span></label>
             <input class="form-input" id="set-rate" type="number" value="${rate}" oninput="document.getElementById('rate-preview').textContent=Number(this.value).toLocaleString()">
-            <div class="form-hint">This rate is used throughout the app for LBP conversions.</div>
+            <div class="form-hint">${App.t('rate_hint')}</div>
           </div>
-          <button class="btn btn-primary" onclick="SettingsModule.saveRate()">💾 Save Rate</button>
+          <button class="btn btn-primary" onclick="SettingsModule.saveRate()">${App.t('save_rate_btn')}</button>
         </div>`;
     } else if(tab==='whatsapp'){
       let wa = {};
       try{const d=await _db.collection(COL.SETTINGS).doc('global').get();if(d.exists)wa=d.data();}catch(e){}
       content.innerHTML=`
         <div class="settings-card">
-          <div class="settings-card-title">💬 WhatsApp / UltraMsg</div>
-          <div class="form-group"><label class="form-label">UltraMsg Instance ID</label><input class="form-input" id="set-wa-instance" value="${wa.ultraMsgInstance||''}"></div>
-          <div class="form-group"><label class="form-label">UltraMsg Token</label><input class="form-input" id="set-wa-token" type="password" value="${wa.ultraMsgToken||''}"></div>
-          <div class="form-group"><label class="form-label">Expiry Reminder (days before)</label><input class="form-input" id="set-wa-days" type="number" value="${wa.expiryReminderDays||7}"></div>
-          <button class="btn btn-primary" onclick="SettingsModule.saveWA()">💾 Save</button>
+          <div class="settings-card-title">${App.t('whatsapp_ultramsg_title')}</div>
+          <div class="form-group"><label class="form-label">${App.t('ultramsg_instance_lbl')}</label><input class="form-input" id="set-wa-instance" value="${wa.ultraMsgInstance||''}"></div>
+          <div class="form-group"><label class="form-label">${App.t('ultramsg_token_lbl')}</label><input class="form-input" id="set-wa-token" type="password" value="${wa.ultraMsgToken||''}"></div>
+          <div class="form-group"><label class="form-label">${App.t('expiry_reminder_days_lbl')}</label><input class="form-input" id="set-wa-days" type="number" value="${wa.expiryReminderDays||7}"></div>
+          <button class="btn btn-primary" onclick="SettingsModule.saveWA()">💾 ${App.t('save')}</button>
         </div>`;
     }
   }
@@ -870,7 +940,7 @@ const SettingsModule = (() => {
     try{
       await _db.collection(COL.SETTINGS).doc('global').set({dollarRate:rate,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
       Currency.setRate(rate);
-      Toast.success(`Rate updated: $1 = ${rate.toLocaleString()} LBP`);
+      Toast.success(App.t('rate_updated_msg').replace('{rate}', rate.toLocaleString()));
     }catch(e){Toast.error(App.t('error_generic'));}
   }
 
@@ -941,13 +1011,20 @@ const DashboardModule = (() => {
       // Activities
       const actEl=document.getElementById('dash-activity');
       const acts=actSnap.docs.map(d=>d.data());
-      const actIcons={subscriber_added:'green',subscriber_updated:'gold',subscription_added:'blue',subscriber_deleted:'red'};
+      const actIcons={subscriber_added:'green',subscriber_updated:'gold',subscriber_deleted:'red',
+        subscription_added:'blue',subscription_updated:'gold',subscription_deleted:'red',payment_recorded:'green'};
+      const actLabels={
+        subscriber_added:App.t('tl_subscriber_created'), subscriber_updated:App.t('tl_subscriber_updated'),
+        subscriber_deleted:App.t('tl_subscriber_deleted'), subscription_added:App.t('tl_new_subscription'),
+        subscription_updated:App.t('tl_subscription_updated'), subscription_deleted:App.t('tl_subscription_cancelled'),
+        payment_recorded:App.t('tl_payment_recorded'),
+      };
       actEl.innerHTML=acts.length?acts.map(a=>`
         <div class="activity-item">
           <div class="activity-dot ${actIcons[a.action]||'gold'}"></div>
-          <span class="activity-text">${a.details?.name||''} — ${a.action?.replace(/_/g,' ')}</span>
+          <span class="activity-text">${a.details?.name||a.details?.subscriber||''} — ${actLabels[a.action]||App.t('activity_word')}</span>
           <span class="activity-time">${DateUtil.timeAgo(a.timestamp)}</span>
-        </div>`).join(''):`<p class="text-muted text-sm" style="padding:16px 0">No recent activity</p>`;
+        </div>`).join(''):`<p class="text-muted text-sm" style="padding:16px 0">${App.t('no_recent_activity')}</p>`;
 
       // Expiring
       const expEl=document.getElementById('dash-expiring');
@@ -955,10 +1032,10 @@ const DashboardModule = (() => {
         const days=DateUtil.diffDays(s.endDate);
         return `<div class="expiry-item">
           <div class="expiry-days${days<=3?' critical':''}">${days}d</div>
-          <div class="expiry-info"><div class="expiry-name">${s.subscriberName||'—'}</div><div class="expiry-sport">${s.sportName||'—'} · ends ${DateUtil.format(s.endDate)}</div></div>
-          <button class="btn btn-outline btn-sm" onclick="DashboardModule.renew('${s.subscriberId}','${(s.subscriberName||'').replace(/'/g,"\\'")}')">Renew</button>
+          <div class="expiry-info"><div class="expiry-name">${s.subscriberName||'—'}</div><div class="expiry-sport">${s.sportName||'—'} · ${App.t('ends_word')} ${DateUtil.format(s.endDate)}</div></div>
+          <button class="btn btn-outline btn-sm" onclick="DashboardModule.renew('${s.subscriberId}','${(s.subscriberName||'').replace(/'/g,"\\'")}')">${App.t('renew_btn')}</button>
         </div>`;
-      }).join(''):`<p class="text-muted text-sm" style="padding:16px 0">🎉 No expiring subscriptions</p>`;
+      }).join(''):`<p class="text-muted text-sm" style="padding:16px 0">${App.t('no_expiring_subscriptions')}</p>`;
     }catch(e){
       console.error(e);
     }

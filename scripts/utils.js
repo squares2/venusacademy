@@ -274,6 +274,7 @@ const Icon = (() => {
     subscriptions: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3.4h6a1 1 0 0 1 1 1V6H8V4.4a1 1 0 0 1 1-1Z"/><path d="M8.5 11h7M8.5 14.5h7M8.5 18h4"/>',
     coaches: '<rect x="1.8" y="9.2" width="3" height="5.6" rx="1.1"/><rect x="19.2" y="9.2" width="3" height="5.6" rx="1.1"/><path d="M4.8 12h2.2M17 12h2.2"/><rect x="7" y="10.4" width="10" height="3.2" rx="1.2"/>',
     sports: '<circle cx="12" cy="12" r="8.3"/><circle cx="12" cy="12" r="4.7"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/>',
+    courses: '<rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M8 3v4M16 3v4"/><path d="M8.3 14.2l2.1 2.1 4.6-4.6"/>',
     pos: '<circle cx="9.2" cy="20" r="1.3" fill="currentColor" stroke="none"/><circle cx="17.8" cy="20" r="1.3" fill="currentColor" stroke="none"/><path d="M2.3 3h2.4l2.1 11.2a2 2 0 0 0 2 1.65h8.5a2 2 0 0 0 2-1.6L21 7.4H6.1"/>',
     reports: '<path d="M4.2 20.3V10.8M11 20.3V4M17.8 20.3v-7.2"/><path d="M2.5 20.3h19"/>',
     diet: '<path d="M5 19c8 1 14-5 14-13 0-1 0-2-.3-3-7 0-13 5-14 13-.3 1-.2 2 .3 3Z"/><path d="M6.3 17.7C10 14 14 9.7 17.7 6"/>',

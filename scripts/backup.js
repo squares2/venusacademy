@@ -429,8 +429,8 @@ const BackupModule = (() => {
           <p class="confirm-message" style="margin-bottom:14px">
             ${isReplace ? t('backup_confirm_replace_msg') : t('backup_confirm_merge_msg')}
           </p>
-          <p class="text-muted text-sm" style="margin-bottom:10px">${t('backup_confirm_type')} <strong>RESTORE</strong></p>
-          <input class="form-input" id="restore-confirm-input" placeholder="RESTORE" oninput="document.getElementById('restore-confirm-btn').disabled = this.value.trim() !== 'RESTORE'">
+          <p class="text-muted text-sm" style="margin-bottom:10px">${t('backup_confirm_type')} <strong>${t('restore_confirm_word')}</strong></p>
+          <input class="form-input" id="restore-confirm-input" placeholder="${t('restore_confirm_word')}" oninput="document.getElementById('restore-confirm-btn').disabled = this.value.trim() !== '${t('restore_confirm_word')}'">
         </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" onclick="Modal.close('modal-restore-confirm')">${t('cancel')}</button>
@@ -544,8 +544,8 @@ const BackupModule = (() => {
             ${t('backup_reset_confirm_msg')} <strong>${selected.map(c => c.name).join(', ')}</strong>.
           </p>
           ${noRecentBackup ? `<p style="color:var(--warning);font-size:12.5px;margin-bottom:14px">⚠️ ${t('backup_no_recent_backup')}</p>` : ''}
-          <p class="text-muted text-sm" style="margin-bottom:10px">${t('backup_confirm_type')} <strong>DELETE</strong></p>
-          <input class="form-input" id="reset-confirm-input" placeholder="DELETE" oninput="document.getElementById('reset-confirm-btn').disabled = this.value.trim() !== 'DELETE'">
+          <p class="text-muted text-sm" style="margin-bottom:10px">${t('backup_confirm_type')} <strong>${t('delete_confirm_word')}</strong></p>
+          <input class="form-input" id="reset-confirm-input" placeholder="${t('delete_confirm_word')}" oninput="document.getElementById('reset-confirm-btn').disabled = this.value.trim() !== '${t('delete_confirm_word')}'">
         </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" onclick="Modal.close('modal-reset-confirm')">${t('cancel')}</button>

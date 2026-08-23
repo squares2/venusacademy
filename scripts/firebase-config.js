@@ -21,6 +21,7 @@ const COL = {
   COACHES:       "coaches",
   SPORTS:        "sports",
   SUBSCRIPTIONS: "subscriptions",
+  COURSES:       "courses",
   PAYMENTS:      "payments",
   PRODUCTS:      "products",
   SALES:         "sales",
@@ -43,10 +44,10 @@ const ROLES = {
 // ── Role Permissions Map ────────────────────────────
 const PERMISSIONS = {
   super_admin:   ["*"],  // wildcard = all
-  admin:         ["dashboard","subscribers","coaches","sports","subscriptions","pos","reports","diet","settings_gym"],
+  admin:         ["dashboard","subscribers","coaches","sports","subscriptions","courses","pos","reports","diet","settings_gym"],
   // NOTE: "backup" is intentionally left out of every role except super_admin — the
   // restore action can overwrite or wipe live data, so access stays with the highest role.
   coach:         ["dashboard","subscribers_view","subscriptions_view","diet","workout"],
-  receptionist:  ["dashboard","subscribers","subscriptions","pos"],
+  receptionist:  ["dashboard","subscribers","subscriptions","courses","pos"],
   subscriber:    ["my_profile","my_plan"]
 };
