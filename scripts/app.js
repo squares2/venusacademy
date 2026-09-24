@@ -95,6 +95,9 @@ const App = (() => {
       export_btn: 'Export',
       search_name_phone_sport: 'Search name, phone, or sport…',
       all_sports: 'All Sports',
+      all_payments: 'All Payments',
+      has_balance: 'Has balance (unpaid/partial)',
+      no_subscription_lbl: 'No subscription',
       expires: 'Expires',
       no_matches: 'No matches',
       no_matching_subscribers: 'No matching subscribers',
@@ -286,6 +289,12 @@ const App = (() => {
       active: 'Active',
       expired: 'Expired',
       expiring_soon: 'Expiring Soon',
+      auto_renew_lbl: 'Auto-renew when it ends',
+      auto_renew_hint: "Renews automatically for the same months at the sport's current monthly price (unpaid until collected).",
+      auto_renew_already: 'Already renewed — turn auto-renew on the newer subscription instead.',
+      auto_renew_badge: 'Auto',
+      renewed_badge: 'Renewed',
+      auto_renewed_count: 'subscription(s) renewed automatically',
       name: 'Full Name',
       phone: 'Phone',
       address: 'Address',
@@ -489,6 +498,9 @@ const App = (() => {
       export_btn: 'تصدير',
       search_name_phone_sport: 'ابحث بالاسم أو الهاتف أو الرياضة…',
       all_sports: 'كل الرياضات',
+      all_payments: 'كل الدفعات',
+      has_balance: 'عليه رصيد (غير مدفوع/جزئي)',
+      no_subscription_lbl: 'بدون اشتراك',
       expires: 'تاريخ الانتهاء',
       no_matches: 'لا توجد نتائج',
       no_matching_subscribers: 'لا يوجد مشتركون مطابقون',
@@ -680,6 +692,12 @@ const App = (() => {
       active: 'نشط',
       expired: 'منتهي',
       expiring_soon: 'ينتهي قريباً',
+      auto_renew_lbl: 'تجديد تلقائي عند الانتهاء',
+      auto_renew_hint: 'يتجدد تلقائياً لنفس عدد الأشهر بالسعر الشهري الحالي للرياضة (غير مدفوع حتى التحصيل).',
+      auto_renew_already: 'تم تجديده مسبقاً — فعّل التجديد التلقائي على الاشتراك الأحدث.',
+      auto_renew_badge: 'تلقائي',
+      renewed_badge: 'مجدَّد',
+      auto_renewed_count: 'اشتراك/اشتراكات تم تجديدها تلقائياً',
       name: 'الاسم الكامل',
       phone: 'رقم الهاتف',
       address: 'العنوان',
@@ -1098,6 +1116,22 @@ const App = (() => {
     renderSidebar();
     navigate('dashboard');
     Toast.success(`${t('welcome')}, ${_profile.displayName || _profile.name || ''}!`);
+    runAutoRenewals();
+  }
+
+  /* ── Auto-renew ended subscriptions (roles that can write subscriptions) ── */
+  async function runAutoRenewals() {
+    if (!_profile || !['super_admin', 'admin', 'receptionist'].includes(_profile.role)) return;
+    if (typeof SubscriptionsModule === 'undefined' || !SubscriptionsModule.processAutoRenewals) return;
+    try {
+      const renewed = await SubscriptionsModule.processAutoRenewals(_db, true);
+      if (renewed > 0) {
+        Toast.info(`${renewed} ${t('auto_renewed_count')}`);
+        if (_page !== 'subscriptions') navigate(_page); // refresh counts; the Subscriptions page reloads itself
+      }
+    } catch (e) {
+      console.error('Auto-renew failed:', e);
+    }
   }
 
   /* ── Auth Module wiring ──────────────────────────── */

@@ -433,6 +433,8 @@ const SubscriptionsModule = (() => {
   let _db, _all = [], _sports = [], _coaches = [], _subscribers = [];
   let _page = 1; const PER_PAGE = 15;
   let _editId = null;
+  let _renewPromise = null, _lastRenewRun = 0;
+  const RENEW_THROTTLE_MS = 10 * 60 * 1000;
 
   async function render(db, profile) {
     _db = db;
@@ -483,7 +485,12 @@ const SubscriptionsModule = (() => {
         </div>
       </div>
       ${buildModal()}`;
-    await loadDeps(); await loadData();
+    await loadDeps();
+    try {
+      const renewed = await processAutoRenewals(_db);
+      if (renewed > 0) Toast.info(`${renewed} ${App.t('auto_renewed_count')}`);
+    } catch (e) { console.error('Auto-renew failed:', e); }
+    await loadData();
   }
 
   async function loadDeps() {
@@ -604,6 +611,12 @@ const SubscriptionsModule = (() => {
         partial:`<span class="badge badge-info">⊘ ${App.t('partial')}</span>`,
         unpaid:`<span class="badge badge-expired">✕ ${App.t('unpaid')}</span>`
       }[s._status]||'';
+      const renewBadge = s.autoRenew
+        ? `<span class="badge badge-gold" title="${App.t('auto_renew_hint')}">🔁 ${App.t('auto_renew_badge')}</span>`
+        : s.renewedToId
+          ? `<span class="badge" style="background:var(--bg-hover);color:var(--text-secondary)">↻ ${App.t('renewed_badge')}</span>`
+          : '';
+      const badges = `<div class="flex gap-2" style="flex-wrap:wrap">${statusBadge}${renewBadge}</div>`;
       const esc=(s.subscriberName||'').replace(/'/g,"\\'");
       const payBtn=remaining>0?`<button class="btn btn-success btn-sm" onclick="SubscriptionsModule.payRemaining('${s.id}','${esc}',${remaining})">💰 ${App.t('pay_btn')}</button>`:'';
       return `<tr>
@@ -612,7 +625,7 @@ const SubscriptionsModule = (() => {
         <td class="dt-only">${s.sportName||'—'}</td>
         <td class="dt-only">${s.coachName||'—'}</td>
         <td class="dt-only" style="font-size:11px">${DateUtil.format(s.startDate)}<br>${DateUtil.format(s.endDate)}</td>
-        <td class="dt-only">${statusBadge}</td>
+        <td class="dt-only">${badges}</td>
         <td class="dt-only">${Currency.formatUSD(s.totalAmount||0)}</td>
         <td class="dt-only" style="color:var(--success)">${Currency.formatUSD(s.amountPaid||0)}</td>
         <td class="dt-only" style="color:${remColor}">${Currency.formatUSD(remaining)}</td>
@@ -627,7 +640,7 @@ const SubscriptionsModule = (() => {
                 <div style="font-weight:700;font-size:14px">${s.subscriberName||'—'}</div>
                 <div style="font-size:11px;color:var(--text-muted)">${s.sportName||''} ${s.coachName?'· '+s.coachName:''}</div>
               </div>
-              ${statusBadge}
+              ${badges}
             </div>
             <div class="mobile-card-body">
               <div class="mobile-card-row"><span>${App.t('period_col')}</span><span style="font-size:11px">${DateUtil.format(s.startDate)} → ${DateUtil.format(s.endDate)}</span></div>
@@ -793,6 +806,15 @@ const SubscriptionsModule = (() => {
           </div>
           <div class="form-row cols-1">
             <div class="form-group">
+              <label class="form-check" for="subf-autorenew">
+                <input type="checkbox" id="subf-autorenew">
+                <span class="form-check-label">🔁 ${t('auto_renew_lbl')}</span>
+              </label>
+              <div class="text-muted" id="subf-autorenew-hint" style="font-size:11px;margin-top:4px">${t('auto_renew_hint')}</div>
+            </div>
+          </div>
+          <div class="form-row cols-1">
+            <div class="form-group">
               <label class="form-label">${t('notes')}</label>
               <textarea class="form-textarea" id="subf-notes" rows="2"></textarea>
             </div>
@@ -817,6 +839,7 @@ const SubscriptionsModule = (() => {
     document.getElementById('subf-start').value=DateUtil.today();
     document.getElementById('subf-end').value='';
     const monthsEl0=document.getElementById('subf-months'); if(monthsEl0) monthsEl0.value='1';
+    setAutoRenewField(false, false);
     const subInput = document.getElementById('subf-subscriber-input');
     const subHidden = document.getElementById('subf-subscriber');
     if (subInput) subInput.value = subscriberName || '';
@@ -841,7 +864,8 @@ const SubscriptionsModule = (() => {
     document.getElementById('subf-paid').value = s.amountPaid||'';
     document.getElementById('subf-start').value = s.startDate||'';
     document.getElementById('subf-end').value = s.endDate||'';
-    const monthsEl=document.getElementById('subf-months'); if(monthsEl) monthsEl.value='1';
+    setMonthsSelect(s.months || monthsBetween(s.startDate, s.endDate));
+    setAutoRenewField(!!s.autoRenew, !!s.renewedToId);
     const subInput = document.getElementById('subf-subscriber-input');
     const subHidden = document.getElementById('subf-subscriber');
     if (subInput) subInput.value = s.subscriberName || '';
@@ -849,6 +873,31 @@ const SubscriptionsModule = (() => {
     hideSubscriberDropdown();
     bindDateAutoCalc(); // don't recalc — keep the stored end date until start/months are actually changed
     Modal.open('modal-subscription');
+  }
+
+  /* ── Months helpers (older records have no stored months) ── */
+  function monthsBetween(start, end) {
+    if (!start || !end) return 1;
+    return Math.max(1, Math.round(DateUtil.diffDays(end, start) / 30.44));
+  }
+
+  function setMonthsSelect(n) {
+    const el = document.getElementById('subf-months');
+    if (!el) return;
+    const v = String(n || 1);
+    if (![...el.options].some(o => o.value === v)) {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = `${v} ${App.t(v === '1' ? 'month_singular' : 'month_plural')}`;
+      el.appendChild(o);
+    }
+    el.value = v;
+  }
+
+  function setAutoRenewField(checked, alreadyRenewed) {
+    const cb = document.getElementById('subf-autorenew');
+    const hint = document.getElementById('subf-autorenew-hint');
+    if (cb) { cb.checked = checked && !alreadyRenewed; cb.disabled = alreadyRenewed; }
+    if (hint) hint.textContent = App.t(alreadyRenewed ? 'auto_renew_already' : 'auto_renew_hint');
   }
 
   /* ── Auto end-date calc, bound once regardless of how many times the modal reopens ── */
@@ -895,6 +944,8 @@ const SubscriptionsModule = (() => {
       paymentMethod,
       startDate:document.getElementById('subf-start').value,
       endDate:document.getElementById('subf-end').value,
+      months:Number(document.getElementById('subf-months').value)||1,
+      autoRenew:!!document.getElementById('subf-autorenew')?.checked,
       notes:document.getElementById('subf-notes').value.trim(),
     };
     try{
@@ -908,6 +959,103 @@ const SubscriptionsModule = (() => {
       }
       Toast.success(App.t('saved')); Modal.close('modal-subscription'); await loadData();
     }catch(e){Toast.error(App.t('error_generic'));}
+  }
+
+  /* ── Auto-renewal ──────────────────────────────────
+     A subscription marked autoRenew that has ended gets a follow-up
+     subscription starting on its end date, same sport / coach / months,
+     priced at the sport's CURRENT monthly price × months, unpaid.
+     The old record is linked (renewedToId) and its flag moves to the new one.
+     Runs client-side on login and when the Subscriptions page opens. ── */
+  function processAutoRenewals(db, force = false) {
+    if (_renewPromise) return _renewPromise;
+    if (!force && Date.now() - _lastRenewRun < RENEW_THROTTLE_MS) return Promise.resolve(0);
+    _renewPromise = runAutoRenewals(db)
+      .finally(() => { _lastRenewRun = Date.now(); _renewPromise = null; });
+    return _renewPromise;
+  }
+
+  async function runAutoRenewals(db) {
+    const today = DateUtil.today();
+    const snap = await db.collection(COL.SUBSCRIPTIONS).where('autoRenew', '==', true).get();
+    const due = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+      .filter(s => !s.renewedToId && s.endDate && s.endDate < today);
+    if (!due.length) return 0;
+
+    const [spSnap, coSnap] = await Promise.all([
+      db.collection(COL.SPORTS).get(),
+      db.collection(COL.COACHES).get(),
+    ]);
+    const sports  = new Map(spSnap.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
+    const coaches = new Map(coSnap.docs.map(d => [d.id, { id: d.id, ...d.data() }]));
+
+    let count = 0;
+    for (const s of due) {
+      try {
+        // Staff already renewed this manually → just switch auto-renew off.
+        const others = await db.collection(COL.SUBSCRIPTIONS).where('subscriberId', '==', s.subscriberId).get();
+        const manuallyRenewed = others.docs.some(d => d.id !== s.id && d.data().sportId === s.sportId && (d.data().endDate || '') > s.endDate);
+        if (manuallyRenewed) {
+          await db.collection(COL.SUBSCRIPTIONS).doc(s.id).update({ autoRenew: false });
+          continue;
+        }
+        const sport = sports.get(s.sportId);
+        if (!sport) continue; // sport deleted — can't price it, leave for staff
+
+        // Catch up one period at a time if the app wasn't opened for a while (capped).
+        let cur = s;
+        for (let i = 0; i < 24 && cur && cur.endDate < today; i++) {
+          cur = await renewOne(db, cur, sport, coaches.get(cur.coachId) || null);
+          if (cur) count++;
+        }
+      } catch (e) {
+        console.error('Auto-renew failed for subscription', s.id, e);
+      }
+    }
+    return count;
+  }
+
+  async function renewOne(db, prev, sport, coach) {
+    const months = Number(prev.months) || monthsBetween(prev.startDate, prev.endDate);
+    const startDate = prev.endDate;
+    const data = {
+      subscriberId: prev.subscriberId, subscriberName: prev.subscriberName || '',
+      sportId: sport.id, sportName: sport.name || prev.sportName || '',
+      coachId: prev.coachId || null,
+      coachName: coach ? coach.name : (prev.coachName || null),
+      coachCommission: coach ? (coach.commission || 0) : (prev.coachCommission || 0),
+      totalAmount: (Number(sport.price) || 0) * months,
+      amountPaid: 0,
+      paymentMethod: 'unpaid',
+      startDate,
+      endDate: DateUtil.addMonths(startDate, months),
+      months,
+      autoRenew: true,
+      renewedFromId: prev.id,
+      notes: '',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    };
+    const prevRef = db.collection(COL.SUBSCRIPTIONS).doc(prev.id);
+    const newRef  = db.collection(COL.SUBSCRIPTIONS).doc();
+    const subscriberRef = db.collection(COL.SUBSCRIBERS).doc(prev.subscriberId);
+
+    const created = await db.runTransaction(async tx => {
+      const [prevSnap, subSnap] = await Promise.all([tx.get(prevRef), tx.get(subscriberRef)]);
+      const p = prevSnap.exists ? prevSnap.data() : null;
+      // Another device already handled it, or it was switched off meanwhile.
+      if (!p || !p.autoRenew || p.renewedToId) return false;
+      if (!subSnap.exists) { tx.update(prevRef, { autoRenew: false }); return false; }
+      tx.set(newRef, data);
+      tx.update(prevRef, { autoRenew: false, renewedToId: newRef.id });
+      return true;
+    });
+    if (!created) return null;
+
+    await logActivity(db, 'subscription_added', {
+      subscriber: data.subscriberName, subscriberId: data.subscriberId,
+      sport: data.sportName, amount: data.totalAmount, paid: 0, autoRenewed: true,
+    });
+    return { id: newRef.id, ...data };
   }
 
   function payRemaining(id,name,remaining){
@@ -933,7 +1081,7 @@ const SubscriptionsModule = (() => {
     }});
   }
 
-  return {render,openNew,openEdit,save,payRemaining,del,onSearch,onFilter,goPage,
+  return {render,openNew,openEdit,save,payRemaining,del,onSearch,onFilter,goPage,processAutoRenewals,
            onSubscriberSearch,selectSubscriber,hideSubscriberDropdown,
            showSearchSuggestions,hideSearchSuggestions,selectSearchTerm};
 })();

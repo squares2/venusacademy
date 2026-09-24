@@ -5,7 +5,7 @@
 const SubscribersModule = (() => {
 
   let _db, _profile;
-  let _all = [], _filtered = [];
+  let _all = [], _rows = [], _filtered = [];
   let _sports = [];
   let _page = 1;
   const PER_PAGE = 15;
@@ -43,9 +43,17 @@ const SubscribersModule = (() => {
           <option value="active">${t('active')}</option>
           <option value="expired">${t('expired')}</option>
           <option value="expiring">${t('expiring_soon')}</option>
+          <option value="none">${t('no_subscription_lbl')}</option>
         </select>
         <select class="filter-select" id="sub-filter-sport" onchange="SubscribersModule.onFilter()">
           <option value="">${t('all_sports')}</option>
+        </select>
+        <select class="filter-select" id="sub-filter-pay" onchange="SubscribersModule.onFilter()">
+          <option value="">${t('all_payments')}</option>
+          <option value="owing">${t('has_balance')}</option>
+          <option value="unpaid">${t('unpaid')}</option>
+          <option value="partial">${t('partial')}</option>
+          <option value="paid">${t('paid')}</option>
         </select>
       </div>
 
@@ -167,20 +175,22 @@ const SubscribersModule = (() => {
       const subSnap = await _db.collection(COL.SUBSCRIPTIONS)
         .orderBy('endDate', 'desc').get();
 
-      const subMap = {};
+      // All subscriptions per subscriber, newest end date first
+      const subsBy = {};
       subSnap.forEach(d => {
-        const data = d.data();
-        if (!subMap[data.subscriberId]) subMap[data.subscriberId] = data;
+        const data = { id: d.id, ...d.data() };
+        (subsBy[data.subscriberId] = subsBy[data.subscriberId] || []).push(data);
       });
 
       snap.forEach(d => {
         const sub = { id: d.id, ...d.data() };
-        sub._subscription = subMap[d.id] || null;
+        sub._subscription = subsBy[d.id]?.[0] || null; // latest, used by profile/badges
         sub._status = calcStatus(sub._subscription);
         _all.push(sub);
       });
 
-      _filtered = [..._all];
+      _rows = buildRows(subsBy);
+      _filtered = [..._rows];
       document.getElementById('sub-count-label').textContent =
         `${App.t('total')}: ${_all.length} ${App.t(_all.length === 1 ? 'subscriber_singular' : 'subscribers').toLowerCase()}`;
       renderTable();
@@ -188,6 +198,45 @@ const SubscribersModule = (() => {
       document.getElementById('sub-tbody').innerHTML =
         `<tr><td colspan="9" class="table-empty" style="color:var(--danger)">${App.t('failed_load_data')}</td></tr>`;
     }
+  }
+
+  /* ── Table rows ─────────────────────────────────────
+     One row per subscription the desk needs to see:
+     • the latest subscription of EACH sport the subscriber has, and
+     • any older subscription that still has money owed (unpaid / partial).
+     Subscribers with no subscription at all get one empty row. ── */
+  function payStatus(subscription) {
+    if (!subscription) return 'none';
+    const total = Number(subscription.totalAmount) || 0;
+    const paid  = Number(subscription.amountPaid)  || 0;
+    if (total <= 0 || paid >= total) return 'paid';
+    return paid > 0 ? 'partial' : 'unpaid';
+  }
+
+  function buildRows(subsBy) {
+    const rows = [];
+    _all.forEach(subscriber => {
+      const list = subsBy[subscriber.id] || [];
+      if (!list.length) {
+        rows.push({ subscriber, sub: null, status: 'none', pay: 'none', remaining: 0 });
+        return;
+      }
+      const seenSports = new Set();
+      list.forEach(sub => {
+        const key = sub.sportId || sub.sportName || '';
+        const latestForSport = !seenSports.has(key);
+        seenSports.add(key);
+        const pay = payStatus(sub);
+        if (!latestForSport && pay === 'paid') return;
+        rows.push({
+          subscriber, sub,
+          status: calcStatus(sub),
+          pay,
+          remaining: Math.max(0, (Number(sub.totalAmount) || 0) - (Number(sub.amountPaid) || 0)),
+        });
+      });
+    });
+    return rows;
   }
 
   /* ── Status calculation ───────────────────────────── */
@@ -210,15 +259,23 @@ const SubscribersModule = (() => {
     if (!slice.length) {
       tbody.innerHTML = `<tr><td colspan="9" class="table-empty">${App.t('no_data')}</td></tr>`;
     } else {
-      tbody.innerHTML = slice.map((s, i) => {
+      tbody.innerHTML = slice.map((r, i) => {
         const num = (_page - 1) * PER_PAGE + i + 1;
-        const sub = s._subscription;
+        const s = r.subscriber;
+        const sub = r.sub;
         const statusBadge = {
           active:   `<span class="badge badge-active">● ${App.t('active')}</span>`,
           expired:  `<span class="badge badge-expired">● ${App.t('expired')}</span>`,
           expiring: `<span class="badge badge-warning">● ${App.t('expiring_soon')}</span>`,
           none:     `<span class="badge" style="background:var(--bg-hover);color:var(--text-muted)">—</span>`,
-        }[s._status] || '';
+        }[r.status] || '';
+        const payBadge = {
+          unpaid:  `<span class="badge badge-expired" style="font-size:10px;padding:1px 7px">✕ ${App.t('unpaid')}</span>`,
+          partial: `<span class="badge badge-info" style="font-size:10px;padding:1px 7px">⊘ ${App.t('partial')}</span>`,
+        }[r.pay] || '';
+        const remainingTxt = r.remaining > 0
+          ? `<div style="font-size:11px;color:var(--danger)">${App.t('remaining')}: ${Currency.formatUSD(r.remaining)}</div>` : '';
+        const period = sub?.startDate ? `<div style="font-size:10px;color:var(--text-muted)">${DateUtil.format(sub.startDate)} →</div>` : '';
         const expires = sub?.endDate ? DateUtil.format(sub.endDate) : '—';
         const paid = sub ? Currency.formatUSD(sub.amountPaid || 0) : '—';
         const esc = s.name.replace(/'/g,"\'");
@@ -233,8 +290,8 @@ const SubscribersModule = (() => {
           <td class="dt-only">${sub?.sportName||'—'}</td>
           <td class="dt-only">${sub?.coachName||'—'}</td>
           <td class="dt-only">${statusBadge}</td>
-          <td class="dt-only" style="font-size:12px">${expires}</td>
-          <td class="dt-only" style="color:var(--gold-400)">${paid}</td>
+          <td class="dt-only" style="font-size:12px">${period}${expires}</td>
+          <td class="dt-only"><div style="color:var(--gold-400)">${paid}</div>${remainingTxt}${payBadge}</td>
           <td class="dt-only" onclick="event.stopPropagation()"><div class="flex gap-2">
             <button class="btn btn-ghost btn-sm btn-icon" onclick="SubscribersModule.whatsapp('${s.id}')">💬</button>
             <button class="btn btn-outline btn-sm btn-icon" title="${App.t('activity_word')}" onclick="SubscribersModule.openTimeline('${s.id}','${esc}')">🕒</button>
@@ -256,7 +313,8 @@ const SubscribersModule = (() => {
                 <div class="mobile-card-row"><span>${App.t('sport')}</span><span>${sub?.sportName||'—'}</span></div>
                 <div class="mobile-card-row"><span>${App.t('coach')}</span><span>${sub?.coachName||'—'}</span></div>
                 <div class="mobile-card-row"><span>${App.t('expires')}</span><span>${expires}</span></div>
-                <div class="mobile-card-row"><span>${App.t('paid')}</span><span style="color:var(--gold-400)">${paid}</span></div>
+                <div class="mobile-card-row"><span>${App.t('paid')}</span><span style="color:var(--gold-400)">${paid} ${payBadge}</span></div>
+                ${r.remaining > 0 ? `<div class="mobile-card-row"><span>${App.t('remaining')}</span><span style="color:var(--danger)">${Currency.formatUSD(r.remaining)}</span></div>` : ''}
               </div>
               <div class="mobile-card-actions" onclick="event.stopPropagation()">
                 <button class="btn btn-ghost btn-sm" onclick="SubscribersModule.whatsapp('${s.id}')">💬</button>
@@ -290,13 +348,16 @@ const SubscribersModule = (() => {
     const q      = (document.getElementById('sub-search')?.value || '').toLowerCase();
     const status = document.getElementById('sub-filter-status')?.value || '';
     const sport  = document.getElementById('sub-filter-sport')?.value || '';
+    const pay    = document.getElementById('sub-filter-pay')?.value || '';
 
-    _filtered = _all.filter(s => {
+    _filtered = _rows.filter(r => {
+      const s = r.subscriber;
       const matchQ = !q || s.name?.toLowerCase().includes(q) || s.phone?.includes(q)
-                        || s._subscription?.sportName?.toLowerCase().includes(q);
-      const matchStatus = !status || s._status === status;
-      const matchSport  = !sport  || s._subscription?.sportId === sport;
-      return matchQ && matchStatus && matchSport;
+                        || r.sub?.sportName?.toLowerCase().includes(q);
+      const matchStatus = !status || r.status === status;
+      const matchSport  = !sport  || r.sub?.sportId === sport;
+      const matchPay    = !pay || (pay === 'owing' ? (r.pay === 'unpaid' || r.pay === 'partial') : r.pay === pay);
+      return matchQ && matchStatus && matchSport && matchPay;
     });
     _page = 1;
     renderTable();
@@ -636,10 +697,14 @@ const SubscribersModule = (() => {
 
   /* ── CSV Export ──────────────────────────────────── */
   function exportCSV() {
-    const rows = [[App.t('name'), App.t('phone'), App.t('gender'), App.t('address'), App.t('status_lbl'), App.t('expires')]];
-    _filtered.forEach(s => {
-      rows.push([s.name, s.phone, s.gender, s.address, s._status,
-        s._subscription?.endDate || '']);
+    const rows = [[App.t('name'), App.t('phone'), App.t('gender'), App.t('address'), App.t('sport'), App.t('status_lbl'),
+      App.t('start_date'), App.t('expires'), App.t('total'), App.t('paid'), App.t('remaining')]];
+    _filtered.forEach(r => {
+      const s = r.subscriber, sub = r.sub;
+      rows.push([s.name, s.phone, s.gender, s.address, sub?.sportName || '', r.status,
+        sub?.startDate || '', sub?.endDate || '',
+        sub ? String(sub.totalAmount || 0) : '', sub ? String(sub.amountPaid || 0) : '',
+        sub ? String(r.remaining) : '']);
     });
     const csv = rows.map(r => r.map(c => `"${(c||'').replace(/"/g,'""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], {type:'text/csv'});
