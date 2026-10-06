@@ -2,7 +2,7 @@
 //  VENUS GYM — Service Worker (PWA)
 // ═══════════════════════════════════════════════════
 
-const CACHE_NAME = 'venus-gym-v4';
+const CACHE_NAME = 'venus-gym-v20';
 
 const STATIC_ASSETS = [
   '/',
@@ -16,6 +16,10 @@ const STATIC_ASSETS = [
   '/styles/modules.css',
   '/scripts/firebase-config.js',
   '/scripts/utils.js',
+  '/scripts/netguard.js',
+  '/scripts/course.js',
+  '/scripts/backup.js',
+  '/scripts/whatsapp.js',
   '/scripts/subscribers.js',
   '/scripts/modules-a.js',
   '/scripts/modules-b.js',
@@ -52,20 +56,21 @@ self.addEventListener('fetch', event => {
   if (url.hostname.includes('fonts.g')) return;
   if (url.hostname.includes('jsdelivr.net')) return;
 
-  // Network-first: always try network, fall back to cache
-  event.respondWith(
-    fetch(event.request)
-      .then(response => {
-        // Cache the fresh response
-        if (response && response.status === 200 && response.type === 'basic') {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-        }
-        return response;
-      })
-      .catch(() => {
-        // Network failed — serve from cache (offline fallback)
-        return caches.match(event.request);
-      })
-  );
+  // Network-first with a time limit: on a weak line, don't leave the app
+  // hanging — after NET_TIMEOUT serve the cached copy and let the network
+  // response refresh the cache in the background.
+  const NET_TIMEOUT = 3500;
+  event.respondWith((async () => {
+    const network = fetch(event.request).then(response => {
+      if (response && response.status === 200 && response.type === 'basic') {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+      }
+      return response;
+    });
+    const cached = await caches.match(event.request);
+    if (!cached) return network.catch(() => Response.error());
+    const timeout = new Promise(resolve => setTimeout(() => resolve(cached), NET_TIMEOUT));
+    return Promise.race([network.catch(() => cached), timeout]);
+  })());
 });

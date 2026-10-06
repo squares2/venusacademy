@@ -43,6 +43,7 @@ const SubscribersModule = (() => {
           <option value="active">${t('active')}</option>
           <option value="expired">${t('expired')}</option>
           <option value="expiring">${t('expiring_soon')}</option>
+          <option value="frozen">❄ ${t('frozen_word')}</option>
           <option value="none">${t('no_subscription_lbl')}</option>
         </select>
         <select class="filter-select" id="sub-filter-sport" onchange="SubscribersModule.onFilter()">
@@ -55,6 +56,7 @@ const SubscribersModule = (() => {
           <option value="partial">${t('partial')}</option>
           <option value="paid">${t('paid')}</option>
         </select>
+        ${FilterMemory.resetButton('subscribers')}
       </div>
 
       <div class="table-wrap">
@@ -90,6 +92,12 @@ const SubscribersModule = (() => {
     `;
 
     await loadSports();
+    FilterMemory.register('subscribers', {
+      persist: ['sub-filter-status','sub-filter-sport','sub-filter-pay'],
+      session: ['sub-search'],
+      onReset: () => applyFilters(),
+    });
+    FilterMemory.restore('subscribers');
     await loadData();
   }
 
@@ -190,10 +198,9 @@ const SubscribersModule = (() => {
       });
 
       _rows = buildRows(subsBy);
-      _filtered = [..._rows];
       document.getElementById('sub-count-label').textContent =
         `${App.t('total')}: ${_all.length} ${App.t(_all.length === 1 ? 'subscriber_singular' : 'subscribers').toLowerCase()}`;
-      renderTable();
+      applyFilters(true); // keep filters + page after saves/deletes
     } catch(e) {
       document.getElementById('sub-tbody').innerHTML =
         `<tr><td colspan="9" class="table-empty" style="color:var(--danger)">${App.t('failed_load_data')}</td></tr>`;
@@ -242,8 +249,9 @@ const SubscribersModule = (() => {
   /* ── Status calculation ───────────────────────────── */
   function calcStatus(subscription) {
     if (!subscription || !subscription.endDate) return 'none';
+    if (subscription.frozen) return 'frozen';
     if (DateUtil.isExpired(subscription.endDate)) return 'expired';
-    if (DateUtil.isExpiringSoon(subscription.endDate, 7)) return 'expiring';
+    if (DateUtil.isExpiringSoon(subscription.endDate)) return 'expiring';
     return 'active';
   }
 
@@ -267,6 +275,7 @@ const SubscribersModule = (() => {
           active:   `<span class="badge badge-active">● ${App.t('active')}</span>`,
           expired:  `<span class="badge badge-expired">● ${App.t('expired')}</span>`,
           expiring: `<span class="badge badge-warning">● ${App.t('expiring_soon')}</span>`,
+          frozen:   `<span class="badge badge-frozen">❄ ${App.t('frozen_word')}</span>`,
           none:     `<span class="badge" style="background:var(--bg-hover);color:var(--text-muted)">—</span>`,
         }[r.status] || '';
         const payBadge = {
@@ -279,7 +288,7 @@ const SubscribersModule = (() => {
         const expires = sub?.endDate ? DateUtil.format(sub.endDate) : '—';
         const paid = sub ? Currency.formatUSD(sub.amountPaid || 0) : '—';
         const esc = s.name.replace(/'/g,"\'");
-        return `<tr onclick="SubscribersModule.openProfile('${s.id}')" style="cursor:pointer">
+        return `<tr>
           <!-- DESKTOP cells -->
           <td class="dt-only" style="color:var(--text-muted)">${num}</td>
           <td class="dt-only"><div class="subscriber-name-cell">
@@ -300,7 +309,7 @@ const SubscribersModule = (() => {
           </div></td>
           <!-- MOBILE card cell -->
           <td class="mob-only" colspan="9" style="padding:6px 0;border:none" onclick="event.stopPropagation()">
-            <div class="mobile-card" onclick="SubscribersModule.openProfile('${s.id}')">
+            <div class="mobile-card">
               <div class="mobile-card-header">
                 <div class="flex items-center gap-2">
                   <div class="avatar">${initials(s.name)}</div>
@@ -344,7 +353,8 @@ const SubscribersModule = (() => {
 
   function onFilter() { applyFilters(); }
 
-  function applyFilters() {
+  function applyFilters(keepPage = false) {
+    FilterMemory.save('subscribers');
     const q      = (document.getElementById('sub-search')?.value || '').toLowerCase();
     const status = document.getElementById('sub-filter-status')?.value || '';
     const sport  = document.getElementById('sub-filter-sport')?.value || '';
@@ -359,7 +369,7 @@ const SubscribersModule = (() => {
       const matchPay    = !pay || (pay === 'owing' ? (r.pay === 'unpaid' || r.pay === 'partial') : r.pay === pay);
       return matchQ && matchStatus && matchSport && matchPay;
     });
-    _page = 1;
+    if (!keepPage) _page = 1;
     renderTable();
   }
 
@@ -488,7 +498,7 @@ const SubscribersModule = (() => {
     return {
       subscriber_added:'green', subscriber_updated:'gold', subscriber_deleted:'red',
       subscription_added:'blue', subscription_updated:'gold', subscription_deleted:'red',
-      payment_recorded:'green',
+      payment_recorded:'green', subscription_frozen:'blue', subscription_unfrozen:'green',
     }[action] || 'gold';
   }
 
@@ -501,6 +511,8 @@ const SubscribersModule = (() => {
       case 'subscription_added':    return `${App.t('tl_new_subscription')}${d.sport ? ' — ' + d.sport : ''}${d.amount ? ' · ' + Currency.formatUSD(d.amount) : ''}`;
       case 'subscription_updated':  return `${App.t('tl_subscription_updated')}${d.sport ? ' — ' + d.sport : ''}`;
       case 'subscription_deleted':  return `${App.t('tl_subscription_cancelled')}${d.sport ? ' — ' + d.sport : ''}`;
+      case 'subscription_frozen':   return `❄ ${App.t('tl_subscription_frozen')}${d.sport ? ' — ' + d.sport : ''}${d.reason ? ' · ' + d.reason : ''}`;
+      case 'subscription_unfrozen': return `☀️ ${App.t('tl_subscription_unfrozen')}${d.sport ? ' — ' + d.sport : ''}${d.days != null ? ' · ' + d.days + ' ' + App.t('days_word') : ''}${d.extended ? ' (+' + App.t('extended_word') + ')' : ''}`;
       case 'payment_recorded':      return `${App.t('tl_payment_recorded')}${d.amount ? ' — ' + Currency.formatUSD(d.amount) : ''}${d.sport ? ' (' + d.sport + ')' : ''}`;
       default: return App.t('activity_word');
     }

@@ -58,6 +58,7 @@ const CoachesModule = (() => {
           <span class="search-icon">🔍</span>
           <input class="search-input" id="coach-search" placeholder="${t('search')}" oninput="CoachesModule.onSearch(this.value)">
         </div>
+        ${FilterMemory.resetButton('coaches')}
       </div>
       <div class="coaches-grid" id="coaches-grid"></div>
       <div class="modal-overlay" id="modal-coach">
@@ -116,6 +117,8 @@ const CoachesModule = (() => {
           </div>
         </div>
       </div>`;
+    FilterMemory.register('coaches', { session: ['coach-search'], onReset: () => renderGrid(filteredCoaches()) });
+    FilterMemory.restore('coaches');
     await loadData();
   }
 
@@ -127,7 +130,14 @@ const CoachesModule = (() => {
     _all = coSnap.docs.map(d => ({id:d.id,...d.data()}));
     _sports = spSnap.docs.map(d => ({id:d.id,...d.data()}));
     document.getElementById('coach-count').textContent = `${_all.length} ${App.t(_all.length===1?'coach_singular':'coach_plural')}`;
-    renderGrid(_all);
+    renderGrid(filteredCoaches()); // keep the current search after saves/deletes
+  }
+
+  function filteredCoaches() {
+    const q = (document.getElementById('coach-search')?.value || '').trim().toLowerCase();
+    return !q ? _all : _all.filter(c =>
+      c.name?.toLowerCase().includes(q) ||
+      (c.specialties || []).some(sp => sp.sportName?.toLowerCase().includes(q)));
   }
 
   function renderGrid(list) {
@@ -157,12 +167,9 @@ const CoachesModule = (() => {
     }).join('');
   }
 
-  const onSearch = debounce(val => {
-    const q = val.toLowerCase();
-    renderGrid(_all.filter(c =>
-      c.name?.toLowerCase().includes(q) ||
-      (c.specialties || []).some(sp => sp.sportName?.toLowerCase().includes(q))
-    ));
+  const onSearch = debounce(() => {
+    FilterMemory.save('coaches');
+    renderGrid(filteredCoaches());
   }, 280);
 
   /* ── Specialty rows (multi-sport + schedule) ─────────── */
@@ -432,6 +439,10 @@ const SportsModule = (() => {
 const SubscriptionsModule = (() => {
   let _db, _all = [], _sports = [], _coaches = [], _subscribers = [];
   let _page = 1; const PER_PAGE = 15;
+  let _expanded = new Set(), _lastGroups = []; // subscriber groups open in the list
+  let _selected = new Set(); // subscription ids picked for bulk actions
+  let _debt = new Map();      // subscriberKey → { count, owed, items } across ALL subscriptions
+  let _debtShowAll = false;
   let _editId = null;
   let _renewPromise = null, _lastRenewRun = 0;
   const RENEW_THROTTLE_MS = 10 * 60 * 1000;
@@ -450,6 +461,7 @@ const SubscriptionsModule = (() => {
           <button class="btn btn-primary" onclick="SubscriptionsModule.openNew()">+ ${t('new_subscription')}</button>
         </div>
       </div>
+      <div id="subs-debt-panel"></div>
       <div class="search-bar">
         <div class="search-input-wrap">
           <span class="search-icon">🔍</span>
@@ -459,19 +471,45 @@ const SubscriptionsModule = (() => {
             onblur="setTimeout(SubscriptionsModule.hideSearchSuggestions, 150)">
           <div class="combo-dropdown" id="subs-search-dropdown"></div>
         </div>
-        <select class="filter-select" id="subs-filter" onchange="SubscriptionsModule.onFilter()">
+        <select class="filter-select" id="subs-filter" onchange="SubscriptionsModule.onFilter();SubscriptionsModule.refreshDebtPanel()">
           <option value="">${t('all_status')}</option>
           <option value="active">${t('active')}</option>
           <option value="expired">${t('expired')}</option>
           <option value="expiring">${t('expiring_soon')}</option>
           <option value="partial">${t('partial')}</option>
           <option value="unpaid">${t('unpaid')}</option>
+          <option value="frozen">❄ ${t('frozen_word')}</option>
+          <option value="multi_debt">⚠ ${t('owes_multi_filter')}</option>
         </select>
+        <select class="filter-select" id="subs-filter-sport" onchange="SubscriptionsModule.onFilter()">
+          <option value="">${t('all_sports')}</option>
+        </select>
+        <select class="filter-select" id="subs-filter-coach" onchange="SubscriptionsModule.onFilter()">
+          <option value="">${t('all_coaches')}</option>
+          <option value="__none">${t('no_coach_lbl')}</option>
+        </select>
+        <select class="filter-select" id="subs-filter-date" onchange="SubscriptionsModule.onDateFilter()" title="${t('start_date_filter_hint')}">
+          <option value="">${t('all_dates')}</option>
+          <option value="month">${t('period_this_month')}</option>
+          <option value="last_month">${t('period_last_month')}</option>
+          <option value="3month">${t('period_last_3_months')}</option>
+          <option value="6month">${t('period_last_6_months')}</option>
+          <option value="year">${t('period_this_year')}</option>
+          <option value="custom">${t('custom_range')}</option>
+        </select>
+        <div class="subs-date-range" id="subs-date-range" style="display:none">
+          <input class="filter-select" type="date" id="subs-date-from" title="${t('from_date')}" onchange="SubscriptionsModule.onFilter()">
+          <span class="subs-date-sep">→</span>
+          <input class="filter-select" type="date" id="subs-date-to" title="${t('to_date')}" onchange="SubscriptionsModule.onFilter()">
+        </div>
+        ${FilterMemory.resetButton('subs')}
+        <button class="btn btn-outline subs-expand-all" id="subs-expand-all" onclick="SubscriptionsModule.toggleAllGroups()">⊞ ${t('expand_all')}</button>
       </div>
       <div class="table-wrap">
         <div class="table-scroll">
           <table>
             <thead><tr>
+              <th class="subs-sel-cell"><input type="checkbox" class="subs-cb" id="subs-cb-all" title="${t('select_page')}" onchange="SubscriptionsModule.selectPage(this.checked)"></th>
               <th>#</th><th>${t('subscriber_singular')}</th><th>${t('sport')}</th>
               <th>${t('coach')}</th><th>${t('period_col')}</th><th>${t('status_lbl')}</th>
               <th>${t('total')}</th><th>${t('paid')}</th><th>${t('remaining')}</th><th>${t('actions')}</th>
@@ -484,8 +522,27 @@ const SubscriptionsModule = (() => {
           <div class="pagination" id="subs-pagination"></div>
         </div>
       </div>
+      <div class="subs-bulk-bar" id="subs-bulk-bar" aria-live="polite">
+        <div class="subs-bulk-count"><span id="subs-bulk-n">0</span> ${t('selected_word')}</div>
+        <div class="subs-bulk-actions">
+          <button class="btn btn-outline btn-sm" onclick="SubscriptionsModule.bulkStartDate()">📅 ${t('bulk_change_start')}</button>
+          <button class="btn btn-outline btn-sm" onclick="SubscriptionsModule.bulkCoach()">🏋️ ${t('bulk_change_coach')}</button>
+          <button class="btn btn-outline btn-sm subs-bulk-freeze" onclick="SubscriptionsModule.bulkFreeze()">❄ ${t('freeze_word')}</button>
+          <button class="btn btn-outline btn-sm subs-bulk-freeze" onclick="SubscriptionsModule.bulkUnfreeze()">☀️ ${t('unfreeze_word')}</button>
+          <button class="btn btn-danger btn-sm" onclick="SubscriptionsModule.bulkDelete()">🗑 ${t('delete')}</button>
+          <button class="btn btn-ghost btn-sm subs-bulk-clear" title="${t('clear_selection')}" onclick="SubscriptionsModule.clearSelection()">✕</button>
+        </div>
+      </div>
       ${buildModal()}`;
     await loadDeps();
+    // Bring back this user's last filters (after sport/coach options exist)
+    FilterMemory.register('subs', {
+      persist: ['subs-filter','subs-filter-sport','subs-filter-coach','subs-filter-date','subs-date-from','subs-date-to'],
+      session: ['subs-search'],
+      onReset: () => { syncDateRangeUI(); onFilter(); renderDebtPanel(); },
+    });
+    FilterMemory.restore('subs');
+    syncDateRangeUI();
     try {
       const renewed = await processAutoRenewals(_db);
       if (renewed > 0) Toast.info(`${renewed} ${App.t('auto_renewed_count')}`);
@@ -507,6 +564,11 @@ const SubscriptionsModule = (() => {
     if(spSel) _sports.forEach(s=>{const o=document.createElement('option');o.value=s.id;o.textContent=`${s.name} — ${Currency.formatUSD(s.price)}`;spSel.appendChild(o);});
     populateCoachSelect(); // full list until a sport narrows it down
     if(spSel) spSel.addEventListener('change',()=>{autoFillPrice(); populateCoachSelect(spSel.value);});
+    // List filters (sport / coach)
+    const fSp = document.getElementById('subs-filter-sport');
+    const fCo = document.getElementById('subs-filter-coach');
+    if(fSp) _sports.forEach(s=>{const o=document.createElement('option');o.value=s.id;o.textContent=s.name;fSp.appendChild(o);});
+    if(fCo) _coaches.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.name;fCo.appendChild(o);});
   }
 
   /* ── Searchable subscriber combo ──────────────────── */
@@ -585,87 +647,263 @@ const SubscriptionsModule = (() => {
     const snap = await _db.collection(COL.SUBSCRIPTIONS).orderBy('startDate','desc').get();
     _all = snap.docs.map(d=>({id:d.id,...d.data()}));
     _all.forEach(s=>{
-      if(DateUtil.isExpired(s.endDate)) s._status='expired';
-      else if(DateUtil.isExpiringSoon(s.endDate,7)) s._status='expiring';
+      if(s.frozen) s._status='frozen';            // frozen overrides dates: not active, not expiring, no renewal
+      else if(DateUtil.isExpired(s.endDate)) s._status='expired';
+      else if(DateUtil.isExpiringSoon(s.endDate)) s._status='expiring';
       else if(!(s.amountPaid>0) && (s.totalAmount||0)>0) s._status='unpaid';
       else if((s.amountPaid||0)<(s.totalAmount||0)) s._status='partial';
       else s._status='active';
     });
-    document.getElementById('subs-count').textContent = `${_all.length} ${App.t('subscriptions').toLowerCase()}`;
-    renderTable(_all);
+    const ids = new Set(_all.map(x=>x.id));
+    _selected.forEach(id => { if (!ids.has(id)) _selected.delete(id); });
+    buildDebtMap();
+    renderDebtPanel();
+    renderTable(getFiltered());
+    if (typeof WaQueue !== 'undefined') WaQueue.autoScan(_db).catch(() => {}); // once a day: queue expiring / unpaid reminders
+  }
+
+  /* ── Combined list filter: search text + status + sport + coach ── */
+  function getFiltered() {
+    const q = (document.getElementById('subs-search')?.value || '').trim().toLowerCase();
+    const st = document.getElementById('subs-filter')?.value || '';
+    const sp = document.getElementById('subs-filter-sport')?.value || '';
+    const co = document.getElementById('subs-filter-coach')?.value || '';
+    const [dFrom, dTo] = getDateRange();
+    return _all.filter(s => {
+      if (dFrom && (s.startDate||'') < dFrom) return false;
+      if (dTo && (s.startDate||'') > dTo) return false;
+      if (q && !(s.subscriberName?.toLowerCase().includes(q) || s.sportName?.toLowerCase().includes(q))) return false;
+      if (st === 'multi_debt') {
+        // unpaid fees of subscribers who owe 2+ fees
+        if (!((s.totalAmount||0) - (s.amountPaid||0) > 0)) return false;
+        if ((_debt.get(_subKey(s))?.count || 0) < 2) return false;
+      } else if (st && s._status !== st) return false;
+      if (sp && s.sportId !== sp) return false;
+      if (co === '__none') { if (s.coachId) return false; }
+      else if (co && s.coachId !== co) return false;
+      return true;
+    });
+  }
+
+  /* ── Row builders ───────────────────────────────────── */
+  function subBadges(s) {
+    const statusBadge={
+      active:`<span class="badge badge-active">● ${App.t('active')}</span>`,
+      expired:`<span class="badge badge-expired">● ${App.t('expired')}</span>`,
+      expiring:`<span class="badge badge-warning">● ${App.t('expiring_soon')}</span>`,
+      partial:`<span class="badge badge-info">⊘ ${App.t('partial')}</span>`,
+      unpaid:`<span class="badge badge-expired">✕ ${App.t('unpaid')}</span>`,
+      frozen:`<span class="badge badge-frozen" title="${App.t('frozen_since')} ${DateUtil.format(s.frozenAt)}">❄ ${App.t('frozen_word')} · ${_frozenDays(s)} ${App.t('days_word')}</span>`
+    }[s._status]||'';
+    const renewBadge = s.autoRenew
+      ? `<span class="badge badge-gold${s.frozen?' is-paused':''}" title="${App.t(s.frozen?'auto_renew_paused_hint':'auto_renew_hint')}">🔁 ${App.t('auto_renew_badge')}${s.frozen?' ⏸':''}</span>`
+      : s.renewedToId
+        ? `<span class="badge" style="background:var(--bg-hover);color:var(--text-secondary)">↻ ${App.t('renewed_badge')}</span>`
+        : '';
+    return `<div class="flex gap-2" style="flex-wrap:wrap">${statusBadge}${renewBadge}</div>`;
+  }
+
+  // One subscription row. opts.child → nested under a subscriber group.
+  function subRowHtml(s, num, opts = {}) {
+    const { child = false, gid = '', expanded = false, isLatest = false, idx = 0 } = opts;
+    const remaining=(s.totalAmount||0)-(s.amountPaid||0);
+    const remColor=remaining>0?'var(--danger)':'var(--success)';
+    const badges = subBadges(s);
+    const esc=(s.subscriberName||'').replace(/'/g,"\\'");
+    const payBtn=remaining>0?`<button class="btn btn-success btn-sm" onclick="SubscriptionsModule.payRemaining('${s.id}','${esc}',${remaining})">💰 ${App.t('pay_btn')}</button>`:'';
+    const latestTag = isLatest ? `<span class="subs-latest-tag">${App.t('latest_word')}</span>` : '';
+    const sel = _selected.has(s.id);
+    const trAttrs = (child
+      ? `class="subs-child-row${expanded?'':' is-collapsed'}${sel?' is-selected':''}" data-gid="${gid}"`
+      : `class="${sel?'is-selected':''}"`) + ` data-sid="${s.id}"` + (s.frozen ? ' data-frozen="1"' : '');
+    const cb = `<input type="checkbox" class="subs-cb" data-id="${s.id}" ${sel?'checked':''} onclick="event.stopPropagation()" onchange="SubscriptionsModule.toggleSelect('${s.id}',this.checked)">`;
+    const numCell = child
+      ? `<span class="subs-child-idx">${idx}</span>`
+      : num;
+    const nameCell = child
+      ? `<div class="subs-child-name"><span class="subs-child-arrow">↳</span>${DateUtil.format(s.startDate)} ${latestTag}</div>`
+      : `<strong>${s.subscriberName||'—'}</strong>`;
+    return `<tr ${trAttrs}>
+      <td class="dt-only subs-sel-cell">${cb}</td>
+      <td class="dt-only" style="color:var(--text-muted)">${numCell}</td>
+      <td class="dt-only">${nameCell}</td>
+      <td class="dt-only">${s.sportName||'—'}</td>
+      <td class="dt-only">${s.coachName||'—'}</td>
+      <td class="dt-only" style="font-size:11px">${DateUtil.format(s.startDate)}<br>${DateUtil.format(s.endDate)}</td>
+      <td class="dt-only">${badges}</td>
+      <td class="dt-only">${Currency.formatUSD(s.totalAmount||0)}</td>
+      <td class="dt-only" style="color:var(--success)">${Currency.formatUSD(s.amountPaid||0)}</td>
+      <td class="dt-only" style="color:${remColor}">${Currency.formatUSD(remaining)}</td>
+      <td class="dt-only"><div class="flex gap-2">${payBtn}
+        ${freezeBtn(s, true)}
+        <button class="btn btn-outline btn-sm btn-icon" onclick="SubscriptionsModule.openEdit('${s.id}')">✏️</button>
+        <button class="btn btn-danger btn-sm btn-icon" onclick="SubscriptionsModule.del('${s.id}')">🗑</button>
+      </div></td>
+      <td class="mob-only" colspan="11" style="padding:${child?'0 0 6px':'6px 0'};border:none">
+        <div class="mobile-card${child?' subs-child-card':''}">
+          <div class="mobile-card-header">
+            <div class="subs-mob-head">${cb}<div>
+              <div style="font-weight:700;font-size:14px">${child ? `${DateUtil.format(s.startDate)} ${latestTag}` : (s.subscriberName||'—')}</div>
+              <div style="font-size:11px;color:var(--text-muted)">${s.sportName||''} ${s.coachName?'· '+s.coachName:''}</div>
+            </div></div>
+            ${badges}
+          </div>
+          <div class="mobile-card-body">
+            <div class="mobile-card-row"><span>${App.t('period_col')}</span><span style="font-size:11px">${DateUtil.format(s.startDate)} → ${DateUtil.format(s.endDate)}</span></div>
+            <div class="mobile-card-row"><span>${App.t('total')}</span><span>${Currency.formatUSD(s.totalAmount||0)}</span></div>
+            <div class="mobile-card-row"><span>${App.t('paid')}</span><span style="color:var(--success)">${Currency.formatUSD(s.amountPaid||0)}</span></div>
+            <div class="mobile-card-row"><span>${App.t('remaining')}</span><span style="color:${remColor}">${Currency.formatUSD(remaining)}</span></div>
+          </div>
+          <div class="mobile-card-actions">${payBtn}
+            ${freezeBtn(s, false)}
+            <button class="btn btn-outline btn-sm" onclick="SubscriptionsModule.openEdit('${s.id}')">✏️ ${App.t('edit')}</button>
+            <button class="btn btn-danger btn-sm" onclick="SubscriptionsModule.del('${s.id}')">🗑 ${App.t('delete')}</button>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  // Collapsed summary row for a subscriber with 2+ (filtered) subscriptions.
+  function groupRowHtml(g, num, gid, expanded) {
+    const latest = g.items[0];
+    const total = g.items.reduce((t,s)=>t+(s.totalAmount||0),0);
+    const paid = g.items.reduce((t,s)=>t+(s.amountPaid||0),0);
+    const remaining = total - paid;
+    const remColor = remaining>0?'var(--danger)':'var(--success)';
+    const unpaidCount = g.items.filter(s=>(s.totalAmount||0)-(s.amountPaid||0)>0).length;
+    const sports = [...new Set(g.items.map(s=>s.sportName).filter(Boolean))];
+    const sportTxt = sports.length<=1 ? (sports[0]||'—') : `${sports[0]} <span class="subs-more">+${sports.length-1}</span>`;
+    const earliest = g.items[g.items.length-1];
+    const esc = (latest.subscriberName||'').replace(/'/g,"\\'");
+    const countPill = `<span class="subs-count-pill">${g.items.length} ${App.t('subs_short')}</span>`;
+    const gDebt = _debt.get(g.key);
+    const unpaidNote = gDebt && gDebt.count >= 2
+      ? `<div class="debt-pill ${gDebt.count>=3?'is-high':''}" title="${App.t('owes_total')}: ${Currency.formatUSD(gDebt.owed)}">⚠ ${gDebt.count} ${App.t('unpaid_fees')}</div>`
+      : unpaidCount ? `<div class="subs-unpaid-note">${unpaidCount} ${App.t('with_balance')}</div>` : '';
+    const chevron = `<span class="subs-chevron">▸</span>`;
+    const addBtn = latest.subscriberId
+      ? `<button class="btn btn-outline btn-sm btn-icon" title="${App.t('new_subscription')}" onclick="event.stopPropagation();SubscriptionsModule.openNew('${latest.subscriberId}','${esc}')">＋</button>` : '';
+    const nSel = g.items.filter(x=>_selected.has(x.id)).length;
+    const gcb = `<input type="checkbox" class="subs-cb subs-gcb" data-gid="${gid}" ${nSel===g.items.length?'checked':''} onclick="event.stopPropagation()" onchange="SubscriptionsModule.selectGroup('${gid}',this.checked)">`;
+    return `<tr class="subs-group-row${expanded?' is-open':''}${nSel===g.items.length?' is-selected':''}${gDebt&&gDebt.count>=2?' is-debtor':''}" id="${gid}" onclick="SubscriptionsModule.toggleGroup('${gid}')">
+      <td class="dt-only subs-sel-cell">${gcb}</td>
+      <td class="dt-only"><div class="subs-group-num">${chevron}<span>${num}</span></div></td>
+      <td class="dt-only"><div class="subs-group-name"><strong>${latest.subscriberName||'—'}</strong>${countPill}</div></td>
+      <td class="dt-only">${sportTxt}</td>
+      <td class="dt-only">${latest.coachName||'—'}</td>
+      <td class="dt-only" style="font-size:11px">${DateUtil.format(earliest.startDate)}<br>${DateUtil.format(latest.endDate)}</td>
+      <td class="dt-only">${subBadges(latest)}</td>
+      <td class="dt-only">${Currency.formatUSD(total)}</td>
+      <td class="dt-only" style="color:var(--success)">${Currency.formatUSD(paid)}</td>
+      <td class="dt-only" style="color:${remColor}">${Currency.formatUSD(remaining)}${unpaidNote}</td>
+      <td class="dt-only"><div class="flex gap-2">${addBtn}
+        <button class="btn btn-ghost btn-sm subs-expand-btn" onclick="event.stopPropagation();SubscriptionsModule.toggleGroup('${gid}')">${App.t(expanded?'hide_word':'show_word')}</button>
+      </div></td>
+      <td class="mob-only" colspan="11" style="padding:6px 0;border:none">
+        <div class="mobile-card subs-group-card">
+          <div class="mobile-card-header">
+            <div class="subs-mob-head">${gcb}<div>
+              <div style="font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px">${chevron}${latest.subscriberName||'—'} ${countPill}</div>
+              <div style="font-size:11px;color:var(--text-muted)">${sports.join(' · ')}</div>
+            </div></div>
+            ${subBadges(latest)}
+          </div>
+          <div class="mobile-card-body">
+            <div class="mobile-card-row"><span>${App.t('period_col')}</span><span style="font-size:11px">${DateUtil.format(earliest.startDate)} → ${DateUtil.format(latest.endDate)}</span></div>
+            <div class="mobile-card-row"><span>${App.t('total')}</span><span>${Currency.formatUSD(total)}</span></div>
+            <div class="mobile-card-row"><span>${App.t('paid')}</span><span style="color:var(--success)">${Currency.formatUSD(paid)}</span></div>
+            <div class="mobile-card-row"><span>${App.t('remaining')}</span><span style="color:${remColor}">${Currency.formatUSD(remaining)}</span></div>
+          </div>
+        </div>
+      </td>
+    </tr>`;
+  }
+
+  // Groups the (already filtered) list by subscriber; newest first inside and across groups.
+  function groupBySubscriber(list) {
+    const map = new Map();
+    list.forEach(s => {
+      const key = s.subscriberId || ('name:' + (s.subscriberName||''));
+      if (!map.has(key)) map.set(key, { key, items: [] });
+      map.get(key).items.push(s);
+    });
+    const ts = s => s.createdAt?.toMillis?.() || 0;
+    const groups = [...map.values()];
+    groups.forEach(g => g.items.sort((a,b) =>
+      (b.startDate||'').localeCompare(a.startDate||'') || ts(b) - ts(a)));
+    groups.sort((a,b) =>
+      (b.items[0].startDate||'').localeCompare(a.items[0].startDate||'') || ts(b.items[0]) - ts(a.items[0]));
+    return groups;
   }
 
   function renderTable(list){
-    const total=list.length; const totalPages=Math.max(1,Math.ceil(total/PER_PAGE));
+    const total=list.length;
+    // Header count follows the active filters (shows "x / all" while filtering)
+    const countEl=document.getElementById('subs-count');
+    if(countEl) countEl.textContent = `${total===_all.length?total:`${total} / ${_all.length}`} ${App.t('subscriptions').toLowerCase()}`;
+    const groups = groupBySubscriber(list);
+    _lastGroups = groups;
+    const totalGroups = groups.length;
+    const totalPages=Math.max(1,Math.ceil(totalGroups/PER_PAGE));
     if(_page>totalPages)_page=1;
-    const slice=list.slice((_page-1)*PER_PAGE,_page*PER_PAGE);
+    const slice=groups.slice((_page-1)*PER_PAGE,_page*PER_PAGE);
     const tbody=document.getElementById('subs-tbody');
-    tbody.innerHTML=slice.map((s,i)=>{
+    tbody.innerHTML = slice.length ? slice.map((g,i)=>{
       const num=(_page-1)*PER_PAGE+i+1;
-      const remaining=(s.totalAmount||0)-(s.amountPaid||0);
-      const remColor=remaining>0?'var(--danger)':'var(--success)';
-      const statusBadge={
-        active:`<span class="badge badge-active">● ${App.t('active')}</span>`,
-        expired:`<span class="badge badge-expired">● ${App.t('expired')}</span>`,
-        expiring:`<span class="badge badge-warning">● ${App.t('expiring_soon')}</span>`,
-        partial:`<span class="badge badge-info">⊘ ${App.t('partial')}</span>`,
-        unpaid:`<span class="badge badge-expired">✕ ${App.t('unpaid')}</span>`
-      }[s._status]||'';
-      const renewBadge = s.autoRenew
-        ? `<span class="badge badge-gold" title="${App.t('auto_renew_hint')}">🔁 ${App.t('auto_renew_badge')}</span>`
-        : s.renewedToId
-          ? `<span class="badge" style="background:var(--bg-hover);color:var(--text-secondary)">↻ ${App.t('renewed_badge')}</span>`
-          : '';
-      const badges = `<div class="flex gap-2" style="flex-wrap:wrap">${statusBadge}${renewBadge}</div>`;
-      const esc=(s.subscriberName||'').replace(/'/g,"\\'");
-      const payBtn=remaining>0?`<button class="btn btn-success btn-sm" onclick="SubscriptionsModule.payRemaining('${s.id}','${esc}',${remaining})">💰 ${App.t('pay_btn')}</button>`:'';
-      return `<tr>
-        <td class="dt-only" style="color:var(--text-muted)">${num}</td>
-        <td class="dt-only"><strong>${s.subscriberName||'—'}</strong></td>
-        <td class="dt-only">${s.sportName||'—'}</td>
-        <td class="dt-only">${s.coachName||'—'}</td>
-        <td class="dt-only" style="font-size:11px">${DateUtil.format(s.startDate)}<br>${DateUtil.format(s.endDate)}</td>
-        <td class="dt-only">${badges}</td>
-        <td class="dt-only">${Currency.formatUSD(s.totalAmount||0)}</td>
-        <td class="dt-only" style="color:var(--success)">${Currency.formatUSD(s.amountPaid||0)}</td>
-        <td class="dt-only" style="color:${remColor}">${Currency.formatUSD(remaining)}</td>
-        <td class="dt-only"><div class="flex gap-2">${payBtn}
-          <button class="btn btn-outline btn-sm btn-icon" onclick="SubscriptionsModule.openEdit('${s.id}')">✏️</button>
-          <button class="btn btn-danger btn-sm btn-icon" onclick="SubscriptionsModule.del('${s.id}')">🗑</button>
-        </div></td>
-        <td class="mob-only" colspan="10" style="padding:6px 0;border:none">
-          <div class="mobile-card">
-            <div class="mobile-card-header">
-              <div>
-                <div style="font-weight:700;font-size:14px">${s.subscriberName||'—'}</div>
-                <div style="font-size:11px;color:var(--text-muted)">${s.sportName||''} ${s.coachName?'· '+s.coachName:''}</div>
-              </div>
-              ${badges}
-            </div>
-            <div class="mobile-card-body">
-              <div class="mobile-card-row"><span>${App.t('period_col')}</span><span style="font-size:11px">${DateUtil.format(s.startDate)} → ${DateUtil.format(s.endDate)}</span></div>
-              <div class="mobile-card-row"><span>${App.t('total')}</span><span>${Currency.formatUSD(s.totalAmount||0)}</span></div>
-              <div class="mobile-card-row"><span>${App.t('paid')}</span><span style="color:var(--success)">${Currency.formatUSD(s.amountPaid||0)}</span></div>
-              <div class="mobile-card-row"><span>${App.t('remaining')}</span><span style="color:${remColor}">${Currency.formatUSD(remaining)}</span></div>
-            </div>
-            <div class="mobile-card-actions">${payBtn}
-              <button class="btn btn-outline btn-sm" onclick="SubscriptionsModule.openEdit('${s.id}')">✏️ ${App.t('edit')}</button>
-              <button class="btn btn-danger btn-sm" onclick="SubscriptionsModule.del('${s.id}')">🗑 ${App.t('delete')}</button>
-            </div>
-          </div>
-        </td>
-      </tr>`;
-    }).join('');
-    document.getElementById('subs-pag-info').textContent=`Showing ${Math.min((_page-1)*PER_PAGE+1,total)}–${Math.min(_page*PER_PAGE,total)} of ${total}`;
-    renderPagination('subs-pagination',_page,Math.max(1,Math.ceil(total/PER_PAGE)),'SubscriptionsModule.goPage');
+      if (g.items.length === 1) return subRowHtml(g.items[0], num);
+      const gid = 'sg-' + groupDomId(g.key);
+      const expanded = _expanded.has(g.key);
+      return groupRowHtml(g, num, gid, expanded) +
+        g.items.map((s,j)=>subRowHtml(s, num, { child:true, gid, expanded, isLatest:j===0, idx:`${num}.${j+1}` })).join('');
+    }).join('') : `<tr><td colspan="11" class="table-empty text-muted" style="text-align:center">${App.t('no_matches')}</td></tr>`;
+    document.getElementById('subs-pag-info').textContent=`${App.t('subscribers')}: ${Math.min((_page-1)*PER_PAGE+1,totalGroups)}–${Math.min(_page*PER_PAGE,totalGroups)} / ${totalGroups}`;
+    renderPagination('subs-pagination',_page,totalPages,'SubscriptionsModule.goPage');
+    updateExpandAllBtn();
+    updateSelectionUI();
   }
 
-  function goPage(p){_page=p;renderTable(_all);}
+  /* ── Group expand / collapse ────────────────────────── */
+  function groupDomId(key) { return encodeURIComponent(key).replace(/[^A-Za-z0-9_-]/g, '_'); }
 
-  function applySubsSearch(q) {
-    q = (q||'').toLowerCase();
-    renderTable(!q ? _all : _all.filter(s=>s.subscriberName?.toLowerCase().includes(q)||s.sportName?.toLowerCase().includes(q)));
+  function setGroupOpen(gid, key, open) {
+    if (open) _expanded.add(key); else _expanded.delete(key);
+    const row = document.getElementById(gid);
+    if (row) {
+      row.classList.toggle('is-open', open);
+      const btn = row.querySelector('.subs-expand-btn');
+      if (btn) btn.textContent = App.t(open ? 'hide_word' : 'show_word');
+    }
+    document.querySelectorAll(`tr.subs-child-row[data-gid="${gid}"]`)
+      .forEach(tr => tr.classList.toggle('is-collapsed', !open));
   }
+
+  function toggleGroup(gid) {
+    const g = _lastGroups.find(x => 'sg-' + groupDomId(x.key) === gid);
+    if (!g) return;
+    setGroupOpen(gid, g.key, !_expanded.has(g.key));
+    updateExpandAllBtn();
+  }
+
+  function toggleAllGroups() {
+    const multi = _lastGroups.filter(g => g.items.length > 1);
+    const openAll = !multi.every(g => _expanded.has(g.key));
+    multi.forEach(g => setGroupOpen('sg-' + groupDomId(g.key), g.key, openAll));
+    updateExpandAllBtn();
+  }
+
+  function updateExpandAllBtn() {
+    const btn = document.getElementById('subs-expand-all');
+    if (!btn) return;
+    const multi = _lastGroups.filter(g => g.items.length > 1);
+    btn.disabled = !multi.length;
+    const allOpen = multi.length && multi.every(g => _expanded.has(g.key));
+    btn.innerHTML = allOpen ? `⊟ ${App.t('collapse_all')}` : `⊞ ${App.t('expand_all')}`;
+  }
+
+  function goPage(p){_page=p;renderTable(getFiltered());}
+
+  function applySubsSearch() { onFilter(); }
   const _debouncedSubsSearch = debounce(applySubsSearch, 280);
 
   function onSearch(v) {
@@ -729,7 +967,58 @@ const SubscriptionsModule = (() => {
     applySubsSearch(text);
   }
 
-  function onFilter(){const f=document.getElementById('subs-filter')?.value;renderTable(f?_all.filter(s=>s._status===f):_all);}
+  function onFilter(){
+    _page=1;
+    FilterMemory.save('subs');
+    const list=getFiltered();
+    // never act on rows the admin can no longer see
+    const visible=new Set(list.map(x=>x.id));
+    _selected.forEach(id=>{ if(!visible.has(id)) _selected.delete(id); });
+    renderTable(list);
+  }
+
+  /* ── Date filter (by subscription start date) ───────── */
+  const _ymd = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  // Returns [from, to] as YYYY-MM-DD ('' = open-ended)
+  function getDateRange() {
+    const mode = document.getElementById('subs-filter-date')?.value || '';
+    const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+    switch (mode) {
+      case 'month':      return [_ymd(new Date(y, m, 1)),   _ymd(new Date(y, m+1, 0))];
+      case 'last_month': return [_ymd(new Date(y, m-1, 1)), _ymd(new Date(y, m, 0))];
+      case '3month':     return [_ymd(new Date(y, m-2, 1)), _ymd(new Date(y, m+1, 0))];
+      case '6month':     return [_ymd(new Date(y, m-5, 1)), _ymd(new Date(y, m+1, 0))];
+      case 'year':       return [_ymd(new Date(y, 0, 1)),   _ymd(new Date(y, 11, 31))];
+      case 'custom': {
+        let f = document.getElementById('subs-date-from')?.value || '';
+        let t = document.getElementById('subs-date-to')?.value || '';
+        if (f && t && f > t) [f, t] = [t, f]; // tolerate reversed picks
+        return [f, t];
+      }
+      default: return ['', ''];
+    }
+  }
+
+  function syncDateRangeUI() {
+    const mode = document.getElementById('subs-filter-date')?.value || '';
+    const wrap = document.getElementById('subs-date-range');
+    if (wrap) wrap.style.display = mode === 'custom' ? 'flex' : 'none';
+  }
+
+  function onDateFilter() {
+    const mode = document.getElementById('subs-filter-date')?.value || '';
+    syncDateRangeUI();
+    if (mode !== 'custom') { // custom dates only matter in custom mode
+      const f = document.getElementById('subs-date-from'), t = document.getElementById('subs-date-to');
+      if (f) f.value = ''; if (t) t.value = '';
+    } else {
+      const f = document.getElementById('subs-date-from'), t = document.getElementById('subs-date-to');
+      const now = new Date();
+      if (f && !f.value) f.value = _ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+      if (t && !t.value) t.value = _ymd(now);
+    }
+    onFilter();
+  }
 
   function buildModal(){
     const t=App.t.bind(App);
@@ -839,7 +1128,7 @@ const SubscriptionsModule = (() => {
     document.getElementById('subf-start').value=DateUtil.today();
     document.getElementById('subf-end').value='';
     const monthsEl0=document.getElementById('subf-months'); if(monthsEl0) monthsEl0.value='1';
-    setAutoRenewField(false, false);
+    setAutoRenewField(true, false); // new subscriptions auto-renew by default
     const subInput = document.getElementById('subf-subscriber-input');
     const subHidden = document.getElementById('subf-subscriber');
     if (subInput) subInput.value = subscriberName || '';
@@ -950,11 +1239,15 @@ const SubscriptionsModule = (() => {
     };
     try{
       if(_editId){
+        const before=_all.find(x=>x.id===_editId);
         await _db.collection(COL.SUBSCRIPTIONS).doc(_editId).update(data);
+        const paidMore=(data.amountPaid||0)-(before?.amountPaid||0);
+        if(paidMore>0 && typeof WaQueue!=='undefined') WaQueue.onPayment(_db,{...data,id:_editId},paidMore);
         await logActivity(_db,'subscription_updated',{subscriber:data.subscriberName,subscriberId:data.subscriberId,sport:data.sportName,amount:data.totalAmount,paid:data.amountPaid});
       } else {
         data.createdAt=firebase.firestore.FieldValue.serverTimestamp();
-        await _db.collection(COL.SUBSCRIPTIONS).add(data);
+        const newRef = await _db.collection(COL.SUBSCRIPTIONS).add(data);
+        if((data.amountPaid||0)>0 && typeof WaQueue!=='undefined') WaQueue.onPayment(_db,{...data,id:newRef.id},data.amountPaid);
         await logActivity(_db,'subscription_added',{subscriber:data.subscriberName,subscriberId:data.subscriberId,sport:data.sportName,amount:data.totalAmount,paid:data.amountPaid});
       }
       Toast.success(App.t('saved')); Modal.close('modal-subscription'); await loadData();
@@ -979,7 +1272,7 @@ const SubscriptionsModule = (() => {
     const today = DateUtil.today();
     const snap = await db.collection(COL.SUBSCRIPTIONS).where('autoRenew', '==', true).get();
     const due = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      .filter(s => !s.renewedToId && s.endDate && s.endDate < today);
+      .filter(s => !s.frozen && !s.renewedToId && s.endDate && s.endDate < today); // frozen subscriptions never auto-renew
     if (!due.length) return 0;
 
     const [spSnap, coSnap] = await Promise.all([
@@ -1055,6 +1348,7 @@ const SubscriptionsModule = (() => {
       subscriber: data.subscriberName, subscriberId: data.subscriberId,
       sport: data.sportName, amount: data.totalAmount, paid: 0, autoRenewed: true,
     });
+    if (typeof WaQueue !== 'undefined') WaQueue.onRenewal(db, { id: newRef.id, ...data });
     return { id: newRef.id, ...data };
   }
 
@@ -1066,9 +1360,441 @@ const SubscriptionsModule = (() => {
         const doc=_db.collection(COL.SUBSCRIPTIONS).doc(id);
         const snap=await doc.get(); const d=snap.data();
         await doc.update({amountPaid:(d.totalAmount||0), paymentMethod:'paid'});
+        if(typeof WaQueue!=='undefined') WaQueue.onPayment(_db,{...d,id,amountPaid:(d.totalAmount||0)},remaining);
         await logActivity(_db,'payment_recorded',{subscriber:d.subscriberName,subscriberId:d.subscriberId,sport:d.sportName,amount:remaining});
         Toast.success(App.t('payment_recorded')); await loadData();
       }
+    });
+  }
+
+
+
+  /* ══ Outstanding balances radar ═════════════════════════
+     Groups every unpaid / partially-paid subscription by subscriber
+     (whole list, not just the filtered view) and spotlights the
+     subscribers who owe 2+ fees. ── */
+  const _subKey = s => s.subscriberId || ('name:' + (s.subscriberName||''));
+  const _rem = s => Math.max(0, (s.totalAmount||0) - (s.amountPaid||0));
+
+  function buildDebtMap() {
+    _debt = new Map();
+    _all.forEach(s => {
+      const r = _rem(s); if (!(r > 0)) return;
+      const k = _subKey(s);
+      if (!_debt.has(k)) _debt.set(k, { key:k, subscriberId:s.subscriberId, name:s.subscriberName||'—', count:0, owed:0, items:[] });
+      const d = _debt.get(k); d.count++; d.owed += r; d.items.push(s);
+    });
+    _debt.forEach(d => d.items.sort((a,b) => (a.startDate||'').localeCompare(b.startDate||''))); // oldest first
+  }
+
+  const _initials = n => (n||'?').trim().split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase();
+  const _monthLbl = d => { try { return new Date(d).toLocaleDateString(document.body.classList.contains('lang-ar') ? 'ar' : 'en', { month:'short', year:'2-digit' }); } catch(_) { return d; } };
+  const _daysSince = d => d ? Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 86400000)) : 0;
+
+  function _debtPanelOpen() { try { return localStorage.getItem('venus_debt_panel') !== 'closed'; } catch(_) { return true; } }
+  function toggleDebtPanel() {
+    const open = !_debtPanelOpen();
+    try { localStorage.setItem('venus_debt_panel', open ? 'open' : 'closed'); } catch(_) {}
+    document.getElementById('debt-radar')?.classList.toggle('is-collapsed', !open);
+  }
+
+  function renderDebtPanel() {
+    const host = document.getElementById('subs-debt-panel'); if (!host) return;
+    const all = [..._debt.values()];
+    if (!all.length) { host.innerHTML = ''; return; }
+    const totalOwed = all.reduce((t,d) => t + d.owed, 0);
+    const multi = all.filter(d => d.count >= 2).sort((a,b) => b.owed - a.owed || b.count - a.count);
+    const multiOwed = multi.reduce((t,d) => t + d.owed, 0);
+    const share = totalOwed ? Math.round(multiOwed / totalOwed * 100) : 0;
+    const filterOn = document.getElementById('subs-filter')?.value === 'multi_debt';
+    const shown = _debtShowAll ? multi : multi.slice(0, 6);
+
+    const card = d => {
+      const oldest = d.items[0];
+      const days = _daysSince(oldest.startDate);
+      const lvl = d.count >= 3 ? 'high' : 'mid';
+      const k = encodeURIComponent(d.key);
+      const months = d.items.map(x => `<span class="debt-month" title="${x.sportName||''} · ${DateUtil.format(x.startDate)} · ${Currency.formatUSD(_rem(x))}">${_monthLbl(x.startDate)}<b>${Currency.formatUSD(_rem(x))}</b></span>`).join('');
+      return `
+        <div class="debt-card is-${lvl}">
+          <div class="debt-card-top">
+            <div class="debt-avatar">${_initials(d.name)}<span class="debt-avatar-n">${d.count}</span></div>
+            <div class="debt-who">
+              <div class="debt-name">${d.name}</div>
+              <div class="debt-since">${App.t('oldest_unpaid')} ${DateUtil.format(oldest.startDate)} · <span>${days} ${App.t('days_word')}</span></div>
+            </div>
+            <div class="debt-owed"><span>${App.t('owes_total')}</span>${Currency.formatUSD(d.owed)}</div>
+          </div>
+          <div class="debt-months">${months}</div>
+          <div class="debt-actions">
+            <button class="btn btn-ghost btn-sm" onclick="SubscriptionsModule.debtView('${k}')">👁 ${App.t('view_word')}</button>
+            <button class="btn btn-ghost btn-sm" onclick="SubscriptionsModule.debtRemind('${k}')">💬 ${App.t('remind_word')}</button>
+            <button class="btn btn-success btn-sm" onclick="SubscriptionsModule.debtSettle('${k}')">💰 ${App.t('settle_all')}</button>
+          </div>
+        </div>`;
+    };
+
+    host.innerHTML = `
+      <section class="debt-radar ${_debtPanelOpen() ? '' : 'is-collapsed'}" id="debt-radar">
+        <header class="debt-head" onclick="SubscriptionsModule.toggleDebtPanel()">
+          <div class="debt-head-title">
+            <span class="debt-pulse"></span>
+            <div>
+              <div class="debt-title">${App.t('debt_radar_title')}</div>
+              <div class="debt-sub">${App.t('debt_radar_sub')}</div>
+            </div>
+          </div>
+          <div class="debt-stats">
+            <div class="debt-stat"><b class="c-danger">${Currency.formatUSD(totalOwed)}</b><span>${App.t('total_unpaid')}</span></div>
+            <div class="debt-stat"><b>${all.length}</b><span>${App.t('subscribers_owing')}</span></div>
+            <div class="debt-stat is-key"><b class="c-warn">${multi.length}</b><span>${App.t('owe_2_plus')}</span></div>
+            <div class="debt-stat"><b class="c-warn">${Currency.formatUSD(multiOwed)}</b><span>${share}% ${App.t('of_total_debt')}</span></div>
+          </div>
+          <span class="debt-caret">▾</span>
+        </header>
+        <div class="debt-body">
+          ${multi.length ? `
+            <div class="debt-toolbar">
+              <div class="debt-bar" title="${share}%"><span style="width:${share}%"></span></div>
+              <button class="btn btn-sm ${filterOn?'btn-primary':'btn-outline'}" onclick="SubscriptionsModule.debtFilter()">${filterOn ? '✕ ' + App.t('show_all_subs') : '⚠ ' + App.t('show_only_debtors')}</button>
+            </div>
+            <div class="debt-grid">${shown.map(card).join('')}</div>
+            ${multi.length > 6 ? `<button class="btn btn-ghost btn-sm debt-more" onclick="SubscriptionsModule.debtToggleAll()">${_debtShowAll ? App.t('show_less') : `${App.t('show_all_word')} (${multi.length})`}</button>` : ''}`
+          : `<div class="debt-clear">✅ ${App.t('no_multi_debtors')}</div>`}
+        </div>
+      </section>`;
+  }
+
+  function debtToggleAll() { _debtShowAll = !_debtShowAll; renderDebtPanel(); }
+
+  function debtFilter() {
+    const f = document.getElementById('subs-filter'); if (!f) return;
+    f.value = f.value === 'multi_debt' ? '' : 'multi_debt';
+    onFilter(); renderDebtPanel();
+  }
+
+  // Jump the table to this subscriber and open their group
+  function debtView(k) {
+    const d = _debt.get(decodeURIComponent(k)); if (!d) return;
+    const input = document.getElementById('subs-search'); if (input) input.value = d.name;
+    _expanded.add(d.key);
+    onFilter();
+    document.getElementById('subs-tbody')?.closest('.table-wrap')?.scrollIntoView({ behavior:'smooth', block:'start' });
+  }
+
+  function debtRemind(k) {
+    const d = _debt.get(decodeURIComponent(k)); if (!d) return;
+    const phone = _subscribers.find(x => x.id === d.subscriberId)?.phone;
+    if (!phone) return Toast.warning(App.t('no_phone_number'));
+    const ar = document.body.classList.contains('lang-ar');
+    const lines = d.items.map(x => `• ${x.sportName||''} — ${DateUtil.format(x.startDate)}: ${Currency.formatUSD(_rem(x))}`).join('\n');
+    const msg = ar
+      ? `مرحباً ${d.name}،\nتذكير ودّي من نادي Venus: لديك ${d.count} رسوم اشتراك غير مدفوعة بمجموع ${Currency.formatUSD(d.owed)}:\n${lines}\nشكراً لك 🙏`
+      : `Hello ${d.name},\nA friendly reminder from Venus Gym: you have ${d.count} unpaid subscription fees totalling ${Currency.formatUSD(d.owed)}:\n${lines}\nThank you 🙏`;
+    window.open(buildWhatsAppLink(phone, msg), '_blank');
+  }
+
+  function debtSettle(k) {
+    const d = _debt.get(decodeURIComponent(k)); if (!d) return;
+    const items = d.items.slice();
+    const owed = d.owed;
+    Modal.confirm({
+      title: App.t('record_payment_title'),
+      message: `${App.t('settle_all_msg').replace('{n}', `<strong>${items.length}</strong>`)}<br><strong style="font-size:20px;color:var(--success)">${Currency.formatUSD(owed)}</strong><br><span class="text-muted">${d.name}</span>`,
+      type: 'success', confirmText: App.t('confirm_payment_btn'),
+      onConfirm: async () => {
+        try {
+          await _commitInChunks(items, (b, ref, x) => b.update(ref, { amountPaid: x.totalAmount || 0, paymentMethod: 'paid' }));
+          await Promise.all(items.map(x => logActivity(_db, 'payment_recorded', { subscriber: x.subscriberName, subscriberId: x.subscriberId, sport: x.sportName, amount: _rem(x) })));
+          if (typeof WaQueue !== 'undefined') items.forEach(x => WaQueue.onPayment(_db, { ...x, amountPaid: x.totalAmount || 0 }, _rem(x)));
+          Toast.success(`${App.t('payment_recorded')} · ${Currency.formatUSD(owed)}`);
+          await loadData();
+        } catch (e) { console.error(e); Toast.error(App.t('error_generic')); }
+      },
+    });
+  }
+
+
+  /* ══ Freeze / Unfreeze ═══════════════════════════════
+     Freezing pauses a subscription: it stops counting as active /
+     expiring and auto-renew is paused. Unfreezing can push the end
+     date forward by the number of frozen days, so the member gets
+     back the time they didn't use. ── */
+  const _frozenDays = s => s.frozenAt ? Math.max(0, DateUtil.diffDays(DateUtil.today(), s.frozenAt)) : 0;
+  const _canFreeze = s => !s.frozen && s.endDate && s.endDate >= DateUtil.today();
+
+  function freezeBtn(s, icon) {
+    if (s.frozen) return `<button class="btn btn-sm btn-unfreeze${icon?' btn-icon':''}" title="${App.t('unfreeze_word')}" onclick="SubscriptionsModule.openUnfreeze(['${s.id}'])">☀️${icon?'':' '+App.t('unfreeze_word')}</button>`;
+    if (_canFreeze(s)) return `<button class="btn btn-sm btn-freeze${icon?' btn-icon':''}" title="${App.t('freeze_word')}" onclick="SubscriptionsModule.openFreeze(['${s.id}'])">❄${icon?'':' '+App.t('freeze_word')}</button>`;
+    return '';
+  }
+
+  function openFreeze(ids) {
+    const items = _all.filter(x => ids.includes(x.id) && _canFreeze(x));
+    const skipped = ids.length - items.length;
+    if (!items.length) { Toast.warning(App.t('freeze_none_eligible')); return; }
+    const today = DateUtil.today();
+    const minStart = items.reduce((m, x) => (x.startDate && x.startDate > m ? x.startDate : m), '');
+    _bulkModal({
+      title: `❄ ${App.t('freeze_title')}`,
+      confirmText: `❄ ${App.t('freeze_word')}${items.length > 1 ? ` (${items.length})` : ''}`,
+      confirmClass: 'btn-freeze-solid',
+      body: `
+        ${items.length > 1 ? _selSummary(items) : `<div class="subs-bulk-summary"><strong>${items[0].subscriberName||'—'}</strong> · ${items[0].sportName||''} · ${DateUtil.format(items[0].startDate)} → ${DateUtil.format(items[0].endDate)}</div>`}
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">${App.t('freeze_from')} <span class="required">*</span></label>
+            <input class="form-input" type="date" id="frz-date" value="${today}" min="${minStart}" max="${today}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">${App.t('freeze_reason')}</label>
+            <input class="form-input" id="frz-reason" placeholder="${App.t('freeze_reason_ph')}">
+          </div>
+        </div>
+        <div class="freeze-explain">
+          <div>⏸ ${App.t('freeze_explain_1')}</div>
+          <div>🔁 ${App.t('freeze_explain_2')}</div>
+          <div>☀️ ${App.t('freeze_explain_3')}</div>
+        </div>
+        ${skipped ? `<div class="subs-bulk-warn" style="margin-top:10px">⚠️ ${skipped} ${App.t('freeze_skipped')}</div>` : ''}`,
+      onConfirm: async () => {
+        const from = document.getElementById('frz-date').value || today;
+        const reason = (document.getElementById('frz-reason').value || '').trim();
+        await _commitInChunks(items, (b, ref) => b.update(ref, { frozen: true, frozenAt: from, frozenReason: reason || null }));
+        await Promise.all(items.map(x => logActivity(_db, 'subscription_frozen', { subscriber: x.subscriberName, subscriberId: x.subscriberId, sport: x.sportName, from, reason })));
+        Toast.success(`❄ ${items.length} ${App.t('frozen_done')}`);
+        items.forEach(x => _selected.delete(x.id));
+        await loadData();
+      },
+    });
+  }
+
+  function openUnfreeze(ids) {
+    const items = _all.filter(x => ids.includes(x.id) && x.frozen);
+    if (!items.length) { Toast.warning(App.t('unfreeze_none_eligible')); return; }
+    const today = DateUtil.today();
+    const el = _bulkModal({
+      title: `☀️ ${App.t('unfreeze_title')}`,
+      confirmText: `☀️ ${App.t('unfreeze_word')}${items.length > 1 ? ` (${items.length})` : ''}`,
+      body: `
+        ${items.length > 1 ? _selSummary(items) : ''}
+        <label class="form-check" style="margin-bottom:12px">
+          <input type="checkbox" id="unfrz-extend" checked>
+          <span class="form-check-label">${App.t('unfreeze_extend')}</span>
+        </label>
+        <div class="subs-bulk-preview" id="unfrz-preview"></div>`,
+      onConfirm: async () => {
+        const extend = document.getElementById('unfrz-extend').checked;
+        await _commitInChunks(items, (b, ref, x) => {
+          const days = _frozenDays(x);
+          const data = {
+            frozen: false, frozenAt: null, frozenReason: null,
+            freezeHistory: [...(x.freezeHistory || []), { from: x.frozenAt || today, to: today, days, extended: extend, reason: x.frozenReason || null }],
+          };
+          if (extend && days > 0 && x.endDate) data.endDate = DateUtil.addDays(x.endDate, days);
+          b.update(ref, data);
+        });
+        await Promise.all(items.map(x => logActivity(_db, 'subscription_unfrozen', { subscriber: x.subscriberName, subscriberId: x.subscriberId, sport: x.sportName, days: _frozenDays(x), extended: extend })));
+        Toast.success(`☀️ ${items.length} ${App.t('unfrozen_done')}`);
+        items.forEach(x => _selected.delete(x.id));
+        await loadData();
+      },
+    });
+    const preview = () => {
+      const extend = el.querySelector('#unfrz-extend').checked;
+      el.querySelector('#unfrz-preview').innerHTML = items.slice(0, 8).map(x => {
+        const days = _frozenDays(x);
+        const newEnd = extend && days > 0 ? DateUtil.addDays(x.endDate, days) : x.endDate;
+        return `<div class="subs-bulk-prow">
+          <span class="subs-bulk-pname">${x.subscriberName||'—'} <small>${x.sportName||''} · ❄ ${DateUtil.format(x.frozenAt)} · ${days} ${App.t('days_word')}</small></span>
+          <span class="subs-bulk-pdates">${extend && days > 0 ? `<s>${DateUtil.format(x.endDate)}</s><b>${DateUtil.format(newEnd)}</b>` : `<b style="color:var(--text-secondary)">${DateUtil.format(x.endDate)}</b>`}</span>
+        </div>`;
+      }).join('') + (items.length > 8 ? `<div class="text-muted" style="font-size:12px;padding-top:6px">+${items.length - 8} ${App.t('more_word')}</div>` : '');
+    };
+    el.querySelector('#unfrz-extend').addEventListener('change', preview);
+    preview();
+  }
+
+  function bulkFreeze()   { openFreeze([..._selected]); }
+  function bulkUnfreeze() { openUnfreeze([..._selected]); }
+
+  /* ══ Multi-select & bulk actions ═══════════════════════ */
+  const _pageItems = () => {
+    const slice = _lastGroups.slice((_page-1)*PER_PAGE, _page*PER_PAGE);
+    return slice.flatMap(g => g.items);
+  };
+  const _groupByGid = gid => _lastGroups.find(x => 'sg-' + groupDomId(x.key) === gid);
+  const _selItems = () => _all.filter(x => _selected.has(x.id));
+
+  function toggleSelect(id, on) { on ? _selected.add(id) : _selected.delete(id); updateSelectionUI(); }
+  function selectGroup(gid, on) {
+    const g = _groupByGid(gid); if (!g) return;
+    g.items.forEach(x => on ? _selected.add(x.id) : _selected.delete(x.id));
+    updateSelectionUI();
+  }
+  function selectPage(on) { _pageItems().forEach(x => on ? _selected.add(x.id) : _selected.delete(x.id)); updateSelectionUI(); }
+  function clearSelection() { _selected.clear(); updateSelectionUI(); }
+
+  function updateSelectionUI() {
+    document.querySelectorAll('#subs-tbody .subs-cb[data-id]').forEach(cb => { cb.checked = _selected.has(cb.dataset.id); });
+    document.querySelectorAll('#subs-tbody tr[data-sid]').forEach(tr => tr.classList.toggle('is-selected', _selected.has(tr.dataset.sid)));
+    document.querySelectorAll('#subs-tbody .subs-gcb').forEach(cb => {
+      const g = _groupByGid(cb.dataset.gid); if (!g) return;
+      const n = g.items.filter(x => _selected.has(x.id)).length;
+      cb.checked = n === g.items.length; cb.indeterminate = n > 0 && n < g.items.length;
+      document.getElementById(cb.dataset.gid)?.classList.toggle('is-selected', n === g.items.length);
+    });
+    const all = document.getElementById('subs-cb-all');
+    if (all) {
+      const items = _pageItems(); const n = items.filter(x => _selected.has(x.id)).length;
+      all.checked = items.length > 0 && n === items.length; all.indeterminate = n > 0 && n < items.length;
+    }
+    const bar = document.getElementById('subs-bulk-bar');
+    if (bar) {
+      bar.classList.toggle('open', _selected.size > 0);
+      const nEl = document.getElementById('subs-bulk-n'); if (nEl) nEl.textContent = _selected.size;
+    }
+  }
+
+  // Runs updates/deletes in Firestore batches (limit 500 ops per batch)
+  async function _commitInChunks(items, apply) {
+    for (let i = 0; i < items.length; i += 400) {
+      const batch = _db.batch();
+      items.slice(i, i + 400).forEach(x => apply(batch, _db.collection(COL.SUBSCRIPTIONS).doc(x.id), x));
+      await batch.commit();
+    }
+  }
+
+  function _bulkModal({ title, body, confirmText, confirmClass = 'btn-primary', onConfirm }) {
+    document.getElementById('modal-subs-bulk')?.remove();
+    const el = document.createElement('div');
+    el.className = 'modal-overlay'; el.id = 'modal-subs-bulk';
+    el.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <span class="modal-title">${title}</span>
+          <button class="modal-close" onclick="Modal.close('modal-subs-bulk')">✕</button>
+        </div>
+        <div class="modal-body">${body}</div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" onclick="Modal.close('modal-subs-bulk')">${App.t('cancel')}</button>
+          <button class="btn ${confirmClass}" id="subs-bulk-confirm">${confirmText}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(el);
+    const btn = el.querySelector('#subs-bulk-confirm');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; const label = btn.innerHTML; btn.innerHTML = '…';
+      try { const ok = await onConfirm(); if (ok !== false) Modal.close('modal-subs-bulk'); }
+      catch (e) { console.error(e); Toast.error(App.t('error_generic')); }
+      finally { btn.disabled = false; btn.innerHTML = label; }
+    });
+    Modal.open('modal-subs-bulk');
+    return el;
+  }
+
+  const _selSummary = items => {
+    const names = [...new Set(items.map(x => x.subscriberName || '—'))];
+    return `<div class="subs-bulk-summary"><strong>${items.length}</strong> ${App.t('subscriptions').toLowerCase()} · <strong>${names.length}</strong> ${App.t('subscribers').toLowerCase()}</div>`;
+  };
+
+  /* ── Bulk: change start date (end date follows each one's months) ── */
+  function bulkStartDate() {
+    const items = _selItems(); if (!items.length) return;
+    const monthsOf = x => Number(x.months) || monthsBetween(x.startDate, x.endDate);
+    const today = DateUtil.today();
+    const el = _bulkModal({
+      title: `📅 ${App.t('bulk_change_start')}`,
+      confirmText: `${App.t('apply_to')} ${items.length}`,
+      body: `
+        ${_selSummary(items)}
+        <div class="form-group">
+          <label class="form-label">${App.t('new_start_date')} <span class="required">*</span></label>
+          <input class="form-input" type="date" id="bulk-start" value="${today}">
+        </div>
+        <div class="text-muted" style="font-size:12px;margin:-4px 0 12px">${App.t('bulk_start_hint')}</div>
+        <div class="subs-bulk-preview" id="bulk-start-preview"></div>`,
+      onConfirm: async () => {
+        const start = document.getElementById('bulk-start').value;
+        if (!start) { Toast.error(App.t('new_start_date')); return false; }
+        await _commitInChunks(items, (b, ref, x) => {
+          const m = monthsOf(x);
+          b.update(ref, { startDate: start, endDate: DateUtil.addMonths(start, m), months: m });
+        });
+        await Promise.all(items.map(x => logActivity(_db, 'subscription_updated', { subscriber: x.subscriberName, subscriberId: x.subscriberId, sport: x.sportName, amount: x.totalAmount, paid: x.amountPaid })));
+        Toast.success(`${items.length} ${App.t('bulk_updated')}`);
+        _selected.clear(); await loadData();
+      },
+    });
+    const preview = () => {
+      const start = el.querySelector('#bulk-start').value;
+      const rows = items.slice(0, 8).map(x => `
+        <div class="subs-bulk-prow">
+          <span class="subs-bulk-pname">${x.subscriberName||'—'} <small>${x.sportName||''}</small></span>
+          <span class="subs-bulk-pdates"><s>${DateUtil.format(x.startDate)} → ${DateUtil.format(x.endDate)}</s>
+            <b>${start ? `${DateUtil.format(start)} → ${DateUtil.format(DateUtil.addMonths(start, monthsOf(x)))}` : '—'}</b></span>
+        </div>`).join('');
+      el.querySelector('#bulk-start-preview').innerHTML = rows +
+        (items.length > 8 ? `<div class="text-muted" style="font-size:12px;padding-top:6px">+${items.length - 8} ${App.t('more_word')}</div>` : '');
+    };
+    el.querySelector('#bulk-start').addEventListener('change', preview);
+    preview();
+  }
+
+  /* ── Bulk: change coach (commission follows the new coach) ── */
+  function bulkCoach() {
+    const items = _selItems(); if (!items.length) return;
+    const opts = _coaches.map(c => `<option value="${c.id}">${c.name} (${c.commission||0}%)</option>`).join('');
+    const el = _bulkModal({
+      title: `🏋️ ${App.t('bulk_change_coach')}`,
+      confirmText: `${App.t('apply_to')} ${items.length}`,
+      body: `
+        ${_selSummary(items)}
+        <div class="form-group">
+          <label class="form-label">${App.t('coach')}</label>
+          <select class="form-select" id="bulk-coach"><option value="">${App.t('no_coach_lbl')}</option>${opts}</select>
+        </div>
+        <div class="text-muted" style="font-size:12px;margin:-4px 0 8px">${App.t('bulk_coach_hint')}</div>
+        <div class="subs-bulk-warn" id="bulk-coach-warn" hidden></div>`,
+      onConfirm: async () => {
+        const coId = document.getElementById('bulk-coach').value;
+        const coach = _coaches.find(c => c.id === coId) || null;
+        const data = { coachId: coach?.id || null, coachName: coach?.name || null, coachCommission: coach?.commission || 0 };
+        await _commitInChunks(items, (b, ref) => b.update(ref, data));
+        await Promise.all(items.map(x => logActivity(_db, 'subscription_updated', { subscriber: x.subscriberName, subscriberId: x.subscriberId, sport: x.sportName, amount: x.totalAmount, paid: x.amountPaid })));
+        Toast.success(`${items.length} ${App.t('bulk_updated')}`);
+        _selected.clear(); await loadData();
+      },
+    });
+    const sel = el.querySelector('#bulk-coach');
+    const warn = el.querySelector('#bulk-coach-warn');
+    const check = () => {
+      const c = _coaches.find(x => x.id === sel.value);
+      const specs = (c?.specialties || []).map(sp => sp.sportId);
+      const off = c && specs.length ? items.filter(x => !specs.includes(x.sportId)).length : 0;
+      warn.hidden = !off;
+      if (off) warn.innerHTML = `⚠️ ${off} ${App.t('bulk_coach_sport_warn')}`;
+    };
+    sel.addEventListener('change', check);
+  }
+
+  /* ── Bulk: delete ── */
+  function bulkDelete() {
+    const items = _selItems(); if (!items.length) return;
+    const names = [...new Set(items.map(x => x.subscriberName || '—'))];
+    const list = names.slice(0, 5).join(document.body.classList.contains('lang-ar') ? '، ' : ', ') + (names.length > 5 ? ` +${names.length - 5}` : '');
+    Modal.confirm({
+      title: App.t('bulk_delete_title'),
+      message: `${App.t('bulk_delete_msg').replace('{n}', `<strong>${items.length}</strong>`)}<br><span class="text-muted" style="font-size:12px">${list}</span>`,
+      type: 'danger', confirmText: `${App.t('delete')} (${items.length})`,
+      onConfirm: async () => {
+        try {
+          await _commitInChunks(items, (b, ref) => b.delete(ref));
+          await Promise.all(items.map(x => logActivity(_db, 'subscription_deleted', { subscriber: x.subscriberName, subscriberId: x.subscriberId, sport: x.sportName })));
+          Toast.success(`${items.length} ${App.t('bulk_deleted')}`);
+          _selected.clear(); await loadData();
+        } catch (e) { console.error(e); Toast.error(App.t('error_generic')); }
+      },
     });
   }
 
@@ -1081,7 +1807,10 @@ const SubscriptionsModule = (() => {
     }});
   }
 
-  return {render,openNew,openEdit,save,payRemaining,del,onSearch,onFilter,goPage,processAutoRenewals,
+  return {render,openNew,openEdit,save,payRemaining,del,
+           toggleSelect,selectGroup,selectPage,clearSelection,bulkStartDate,bulkCoach,bulkDelete,
+           openFreeze,openUnfreeze,bulkFreeze,bulkUnfreeze,
+           toggleDebtPanel,refreshDebtPanel:()=>renderDebtPanel(),debtToggleAll,debtFilter,debtView,debtRemind,debtSettle,onSearch,onFilter,onDateFilter,goPage,toggleGroup,toggleAllGroups,processAutoRenewals,
            onSubscriberSearch,selectSubscriber,hideSubscriberDropdown,
            showSearchSuggestions,hideSearchSuggestions,selectSearchTerm};
 })();

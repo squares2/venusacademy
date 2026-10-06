@@ -29,7 +29,8 @@ const COL = {
   WORKOUT_PLANS: "workout_plans",
   ACTIVITIES:    "activities",
   SETTINGS:      "settings",
-  NOTIFICATIONS: "notifications"
+  NOTIFICATIONS: "notifications",
+  WA_QUEUE:      "wa_queue"
 };
 
 // ── Role Definitions ────────────────────────────────
@@ -44,10 +45,10 @@ const ROLES = {
 // ── Role Permissions Map ────────────────────────────
 const PERMISSIONS = {
   super_admin:   ["*"],  // wildcard = all
-  admin:         ["dashboard","subscribers","coaches","sports","subscriptions","courses","pos","reports","diet","settings_gym"],
+  admin:         ["dashboard","subscribers","coaches","sports","subscriptions","courses","pos","reports","diet","settings_gym","whatsapp"],
   // NOTE: "backup" is intentionally left out of every role except super_admin — the
   // restore action can overwrite or wipe live data, so access stays with the highest role.
   coach:         ["dashboard","subscribers_view","subscriptions_view","diet","workout"],
-  receptionist:  ["dashboard","subscribers","subscriptions","courses","pos"],
+  receptionist:  ["dashboard","subscribers","subscriptions","courses","pos","whatsapp"],
   subscriber:    ["my_profile","my_plan"]
 };

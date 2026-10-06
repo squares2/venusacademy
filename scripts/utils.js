@@ -30,13 +30,35 @@ const Currency = {
   }
 };
 
+/* ── App-wide settings (loaded from settings/global) ── */
+const AppSettings = {
+  expiringDays: 7, // how many days before the end date a subscription counts as "expiring soon"
+  setExpiringDays(n) {
+    const v = Math.round(Number(n));
+    this.expiringDays = Number.isFinite(v) && v >= 1 && v <= 90 ? v : 7;
+  },
+  apply(data = {}) {
+    if (data.expiringSoonDays != null) this.setExpiringDays(data.expiringSoonDays);
+  },
+};
+
 /* ── Date / Time ──────────────────────────────────── */
 const DateUtil = {
-  today() { return new Date().toISOString().split('T')[0]; },
+  // Local calendar date (toISOString() is UTC, which in Beirut gives yesterday's date until 3 AM)
+  today() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  },
 
   addMonths(dateStr, months) {
     const d = new Date(dateStr);
     d.setMonth(d.getMonth() + months);
+    return d.toISOString().split('T')[0];
+  },
+
+  addDays(dateStr, days) {
+    const d = new Date(dateStr);
+    d.setDate(d.getDate() + Number(days || 0));
     return d.toISOString().split('T')[0];
   },
 
@@ -73,7 +95,7 @@ const DateUtil = {
   },
 
   isExpired(dateStr) { return this.diffDays(dateStr) < 0; },
-  isExpiringSoon(dateStr, days = 7) {
+  isExpiringSoon(dateStr, days = AppSettings.expiringDays) {
     const d = this.diffDays(dateStr);
     return d >= 0 && d <= days;
   }
@@ -279,6 +301,7 @@ const Icon = (() => {
     reports: '<path d="M4.2 20.3V10.8M11 20.3V4M17.8 20.3v-7.2"/><path d="M2.5 20.3h19"/>',
     diet: '<path d="M5 19c8 1 14-5 14-13 0-1 0-2-.3-3-7 0-13 5-14 13-.3 1-.2 2 .3 3Z"/><path d="M6.3 17.7C10 14 14 9.7 17.7 6"/>',
     users: '<path d="M12 3.2l6.8 2.9v4.7c0 4.7-2.9 7.9-6.8 9.4-3.9-1.5-6.8-4.7-6.8-9.4V6.1L12 3.2Z"/><circle cx="12" cy="10.3" r="2"/><path d="M8.9 15.2c0-1.8 1.4-3 3.1-3s3.1 1.2 3.1 3"/>',
+    whatsapp: '<path d="M4.5 19.5l1.2-3.6A8.3 8.3 0 1 1 8.4 18.6Z"/><path d="M9 8.6c0 3.3 2.9 6.3 6.3 6.4l1.1-1.3-1.8-1-.8.8a4.6 4.6 0 0 1-2.6-2.6l.8-.8-1-1.8Z"/>',
     settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 13.6c.1-.5.15-1 .15-1.6s-.05-1.1-.15-1.6l2-1.6-2-3.4-2.4 1a7.7 7.7 0 0 0-2.6-1.5L14 2h-4l-.4 2.9a7.7 7.7 0 0 0-2.6 1.5l-2.4-1-2 3.4 2 1.6c-.1.5-.15 1-.15 1.6s.05 1.1.15 1.6l-2 1.6 2 3.4 2.4-1a7.7 7.7 0 0 0 2.6 1.5L10 22h4l.4-2.9a7.7 7.7 0 0 0 2.6-1.5l2.4 1 2-3.4-2-1.6Z"/>',
     backup: '<ellipse cx="12" cy="5.6" rx="7.4" ry="2.7"/><path d="M4.6 5.6V12c0 1.5 3.3 2.7 7.4 2.7s7.4-1.2 7.4-2.7V5.6"/><path d="M4.6 12v6.4c0 1.5 3.3 2.7 7.4 2.7s7.4-1.2 7.4-2.7V12"/>',
     revenue: '<circle cx="12" cy="12" r="8.6"/><path d="M12 6.5v11M15 9.3c0-1.3-1.3-2.3-3-2.3s-3 .9-3 2.2c0 3 6 1.4 6 4.3 0 1.3-1.3 2.3-3 2.3s-3-1-3-2.3"/>',
@@ -294,4 +317,79 @@ const Icon = (() => {
   }
 
   return { render };
+})();
+/* ── Filter Memory ────────────────────────────────────
+   Remembers each section's list filters so they survive
+   navigation, reloads and save/delete actions.
+   • persist → localStorage (dropdowns, periods, date ranges)
+   • session → sessionStorage (free-text search: kept while
+     working, cleared when the browser session ends)
+   Stored per signed-in user, so staff sharing a device
+   don't inherit each other's filters. ───────────────── */
+const FilterMemory = (() => {
+  const _cfg = {};
+  const uid = () => { try { return firebase.auth().currentUser?.uid || 'anon'; } catch (_) { return 'anon'; } };
+  const key = (sec, scope) => `venus_filters_${scope}_${uid()}_${sec}`;
+  const store = scope => (scope === 'session' ? sessionStorage : localStorage);
+  const read = (sec, scope) => { try { return JSON.parse(store(scope).getItem(key(sec, scope)) || '{}'); } catch (_) { return {}; } };
+  const write = (sec, scope, obj) => { try { store(scope).setItem(key(sec, scope), JSON.stringify(obj)); } catch (_) {} };
+  const ids = c => [...c.persist, ...c.session];
+
+  // Call once the section's controls are in the DOM (their current values become the defaults).
+  function register(sec, { persist = [], session = [], onReset } = {}) {
+    const defaults = {};
+    [...persist, ...session].forEach(id => { const el = document.getElementById(id); if (el) defaults[id] = el.value; });
+    _cfg[sec] = { persist, session, defaults, onReset };
+  }
+
+  // Puts saved values back. Call after dynamic <option>s are populated.
+  function restore(sec) {
+    const c = _cfg[sec]; if (!c) return false;
+    [['persist', c.persist], ['session', c.session]].forEach(([scope, list]) => {
+      const saved = read(sec, scope);
+      list.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el || !(id in saved)) return;
+        const v = saved[id];
+        if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === v)) return; // option no longer exists
+        el.value = v;
+      });
+    });
+    refresh(sec);
+    return isActive(sec);
+  }
+
+  function save(sec) {
+    const c = _cfg[sec]; if (!c) return;
+    [['persist', c.persist], ['session', c.session]].forEach(([scope, list]) => {
+      const obj = {};
+      list.forEach(id => { const el = document.getElementById(id); if (el) obj[id] = el.value; });
+      write(sec, scope, obj);
+    });
+    refresh(sec);
+  }
+
+  function isActive(sec) {
+    const c = _cfg[sec]; if (!c) return false;
+    return ids(c).some(id => { const el = document.getElementById(id); return el && el.value !== (c.defaults[id] ?? ''); });
+  }
+
+  function refresh(sec) {
+    const on = isActive(sec);
+    document.querySelectorAll(`[data-filter-reset="${sec}"]`).forEach(b => { b.hidden = !on; });
+  }
+
+  function reset(sec) {
+    const c = _cfg[sec]; if (!c) return;
+    ids(c).forEach(id => { const el = document.getElementById(id); if (el) el.value = c.defaults[id] ?? ''; });
+    save(sec);
+    if (typeof c.onReset === 'function') c.onReset();
+  }
+
+  function resetButton(sec) {
+    const label = (typeof App !== 'undefined' && App.t) ? App.t('reset_filters') : 'Reset filters';
+    return `<button type="button" class="btn btn-ghost filter-reset-btn" data-filter-reset="${sec}" hidden onclick="FilterMemory.reset('${sec}')" title="${label}">↺ <span>${label}</span></button>`;
+  }
+
+  return { register, restore, save, reset, refresh, isActive, resetButton };
 })();

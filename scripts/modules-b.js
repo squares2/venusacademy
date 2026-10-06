@@ -34,6 +34,7 @@ const POSModule = (() => {
               <option value="apparel">👕 ${t('cat_apparel')}</option>
               <option value="other">📦 ${t('cat_other')}</option>
             </select>
+            ${FilterMemory.resetButton('pos')}
           </div>
           <div class="pos-products-grid" id="pos-products"></div>
         </div>
@@ -72,13 +73,22 @@ const POSModule = (() => {
         </div>
       </div>
       ${inventoryModal()}`;
+    FilterMemory.register('pos', { persist: ['pos-category'], session: ['pos-search'], onReset: () => applyProductFilter() });
+    FilterMemory.restore('pos');
     await loadProducts();
   }
 
   async function loadProducts() {
     const snap = await _db.collection(COL.PRODUCTS).orderBy('name').get();
     _products = snap.docs.map(d => ({id:d.id,...d.data()}));
-    renderProducts(_products);
+    applyProductFilter(); // keep search/category after sales & inventory edits
+  }
+
+  function applyProductFilter() {
+    FilterMemory.save('pos');
+    const q = (document.getElementById('pos-search')?.value || '').trim().toLowerCase();
+    const cat = document.getElementById('pos-category')?.value || '';
+    renderProducts(_products.filter(p => (!q || p.name?.toLowerCase().includes(q)) && (!cat || p.category === cat)));
   }
 
   function renderProducts(list) {
@@ -95,15 +105,9 @@ const POSModule = (() => {
   function catIcon(c){return{water:'💧',food:'🍎',supplement:'💊',gear:'🥊',apparel:'👕'}[c]||'📦';}
   function catLabel(c){return App.t({water:'cat_water',food:'cat_food',supplement:'cat_supplement',gear:'cat_gear',apparel:'cat_apparel'}[c]||'cat_other');}
 
-  const onSearch = debounce(v => {
-    const q=v.toLowerCase(); const cat=document.getElementById('pos-category')?.value;
-    renderProducts(_products.filter(p=>(p.name?.toLowerCase().includes(q))&&(!cat||p.category===cat)));
-  },250);
+  const onSearch = debounce(() => applyProductFilter(), 250);
 
-  function onCat(){
-    const cat=document.getElementById('pos-category')?.value; const q=(document.getElementById('pos-search')?.value||'').toLowerCase();
-    renderProducts(_products.filter(p=>(!q||p.name?.toLowerCase().includes(q))&&(!cat||p.category===cat)));
-  }
+  function onCat(){ applyProductFilter(); }
 
   function addToCart(id) {
     const p=_products.find(x=>x.id===id); if(!p)return;
@@ -265,28 +269,68 @@ const ReportsModule = (() => {
           <h1 class="page-title">${t('reports')}</h1>
           <p class="page-subtitle">${t('reports_subtitle')}</p>
         </div>
-        <div class="page-header-right">
-          <select class="filter-select" id="rep-period" onchange="ReportsModule.loadReports()">
+        <div class="page-header-right rep-period-bar">
+          <div class="subs-date-range" id="rep-date-range" style="display:none">
+            <input class="filter-select" type="date" id="rep-date-from" title="${t('from_date')}" onchange="ReportsModule.loadReports()">
+            <span class="subs-date-sep">→</span>
+            <input class="filter-select" type="date" id="rep-date-to" title="${t('to_date')}" onchange="ReportsModule.loadReports()">
+          </div>
+          <select class="filter-select" id="rep-period" onchange="ReportsModule.onPeriod()">
             <option value="month">${t('period_this_month')}</option>
             <option value="3month">${t('period_last_3_months')}</option>
             <option value="year">${t('period_this_year')}</option>
             <option value="all">${t('period_all_time')}</option>
+            <option value="custom">${t('custom_range')}</option>
           </select>
         </div>
       </div>
       <div class="kpi-grid" id="rep-kpis"><div class="page-loader"><div class="spinner"></div></div></div>
       <div class="reports-grid" id="rep-charts"></div>`;
+    FilterMemory.register('reports', { persist: ['rep-period','rep-date-from','rep-date-to'] });
+    FilterMemory.restore('reports');
+    syncRangeUI();
     await loadReports();
   }
 
+  const _ymd = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+  function syncRangeUI() {
+    const custom = document.getElementById('rep-period')?.value === 'custom';
+    const wrap = document.getElementById('rep-date-range');
+    if (wrap) wrap.style.display = custom ? 'flex' : 'none';
+  }
+
+  function onPeriod() {
+    const custom = document.getElementById('rep-period')?.value === 'custom';
+    const f = document.getElementById('rep-date-from'), t = document.getElementById('rep-date-to');
+    if (custom) { // sensible starting range: 1st of this month → today
+      const now = new Date();
+      if (f && !f.value) f.value = _ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+      if (t && !t.value) t.value = _ymd(now);
+    } else { if (f) f.value = ''; if (t) t.value = ''; }
+    syncRangeUI();
+    loadReports();
+  }
+
   async function loadReports() {
+    FilterMemory.save('reports');
     const period = document.getElementById('rep-period')?.value || 'month';
     const now = new Date();
-    let fromDate;
+    let fromDate, toDate = new Date(8640000000000000); // open-ended unless custom
+    let periodLabel = {month:App.t('period_this_month'),'3month':App.t('period_last_3_months'),year:App.t('period_this_year'),all:App.t('period_all_time')}[period];
     if(period==='month') fromDate = new Date(now.getFullYear(), now.getMonth(), 1);
     else if(period==='3month') fromDate = new Date(now.getFullYear(), now.getMonth()-3, 1);
     else if(period==='year') fromDate = new Date(now.getFullYear(), 0, 1);
+    else if(period==='custom') {
+      let f = document.getElementById('rep-date-from')?.value || '';
+      let t = document.getElementById('rep-date-to')?.value || '';
+      if (f && t && f > t) [f, t] = [t, f]; // tolerate reversed picks
+      fromDate = f ? new Date(f + 'T00:00:00') : new Date(2000, 0, 1);
+      if (t) toDate = new Date(t + 'T23:59:59.999');
+      periodLabel = `${f ? DateUtil.format(f) : '…'} → ${t ? DateUtil.format(t) : '…'}`;
+    }
     else fromDate = new Date(2000, 0, 1);
+    const inRange = x => { const d = x.createdAt?.toDate?.(); return !!d && d >= fromDate && d <= toDate; };
 
     try {
       const [subSnap, coSnap, subScSnap, salesSnap, courseSnap] = await Promise.all([
@@ -301,14 +345,14 @@ const ReportsModule = (() => {
       const sales = salesSnap.docs.map(d=>({id:d.id,...d.data()}));
       const courses = courseSnap.docs.map(d=>({id:d.id,...d.data()}));
 
-      const periodSubs = subs.filter(s=>s.createdAt?.toDate?.()>=fromDate);
-      const periodSales = sales.filter(s=>s.createdAt?.toDate?.()>=fromDate);
-      const periodCourses = courses.filter(c=>c.createdAt?.toDate?.()>=fromDate);
+      const periodSubs = subs.filter(inRange);
+      const periodSales = sales.filter(inRange);
+      const periodCourses = courses.filter(inRange);
 
       const revenue = periodSubs.reduce((t,s)=>t+(s.amountPaid||0),0);
       const salesRev = periodSales.reduce((t,s)=>t+(s.totalUsd||0),0);
-      const active = subs.filter(s=>!DateUtil.isExpired(s.endDate)).length;
-      const expiring = subs.filter(s=>DateUtil.isExpiringSoon(s.endDate,7)).length;
+      const active = subs.filter(s=>!s.frozen&&!DateUtil.isExpired(s.endDate)).length;
+      const expiring = subs.filter(s=>!s.frozen&&DateUtil.isExpiringSoon(s.endDate)).length;
       const coaches = coSnap.size;
 
       // Courses financials
@@ -336,20 +380,31 @@ const ReportsModule = (() => {
       const courseNetProfit = courseRevenue - courseCoachCost - courseExpenseTotal;
       const activeCourses = courses.filter(c=>courseStatusOf(c)!=='completed').length;
 
+      // Outgoings & net profit (same period as the revenue figures)
+      const coachCommissionTotal = periodSubs.reduce((t,s)=>t+(s.coachName?(s.amountPaid||0)*(s.coachCommission||0)/100:0),0);
+      const courseCostsTotal = courseCoachCost + courseExpenseTotal;
+      const totalRevenue = revenue + salesRev + courseRevenue;
+      const totalOutgoings = coachCommissionTotal + courseCostsTotal;
+      const netProfit = totalRevenue - totalOutgoings;
+
       // KPIs
       document.getElementById('rep-kpis').innerHTML = [
         {icon:'💰',value:Currency.formatUSD(revenue),label:App.t('subscription_revenue'),change:''},
         {icon:'🛒',value:Currency.formatUSD(salesRev),label:App.t('pos_revenue'),change:''},
         {icon:'🎓',value:Currency.formatUSD(courseRevenue),label:App.t('courses_revenue'),change:''},
-        {icon:'💵',value:Currency.formatUSD(revenue+salesRev+courseRevenue),label:App.t('total_revenue'),change:''},
+        {icon:'💵',value:Currency.formatUSD(totalRevenue),label:App.t('total_revenue'),change:'',color:'var(--gold-400)'},
+        {icon:'🤝',value:Currency.formatUSD(coachCommissionTotal),label:App.t('coach_commissions'),change:'',color:'var(--warning)'},
+        {icon:'🧾',value:Currency.formatUSD(courseCostsTotal),label:App.t('course_costs_kpi'),change:'',color:'var(--warning)'},
+        {icon:'📤',value:Currency.formatUSD(totalOutgoings),label:App.t('total_outgoings'),change:'',color:'var(--danger)'},
+        {icon:'📈',value:Currency.formatUSD(netProfit),label:App.t('total_net_profit'),change:'',color:netProfit>=0?'var(--success)':'var(--danger)'},
         {icon:'👥',value:active,label:App.t('active_subs'),change:''},
         {icon:'📚',value:activeCourses,label:App.t('active_courses_lbl'),change:''},
-        {icon:'⚠️',value:expiring,label:App.t('expiring_soon_lbl'),change:''},
+        {icon:'⚠️',value:expiring,label:App.t('expiring_soon_lbl').replace('{n}',AppSettings.expiringDays),change:''},
         {icon:'🏋️',value:coaches,label:App.t('total_coaches'),change:''},
       ].map(k=>`
         <div class="kpi-card">
           <div class="kpi-icon">${k.icon}</div>
-          <div class="kpi-value">${k.value}</div>
+          <div class="kpi-value"${k.color?` style="color:${k.color}"`:''}>${k.value}</div>
           <div class="kpi-label">${k.label}</div>
         </div>`).join('');
 
@@ -365,11 +420,12 @@ const ReportsModule = (() => {
 
       // Coach commission
       const coachMap = {};
-      subs.forEach(s=>{
+      periodSubs.forEach(s=>{
         if(!s.coachName) return;
         const key=s.coachName;
-        if(!coachMap[key]) coachMap[key]={name:key,subs:0,revenue:0,commission:s.coachCommission||0};
+        if(!coachMap[key]) coachMap[key]={name:key,subs:0,revenue:0,commission:s.coachCommission||0,due:0};
         coachMap[key].subs++; coachMap[key].revenue+=(s.amountPaid||0);
+        coachMap[key].due+=(s.amountPaid||0)*(s.coachCommission||0)/100;
       });
       const coachList = Object.values(coachMap);
 
@@ -395,7 +451,7 @@ const ReportsModule = (() => {
             <thead><tr><th>${App.t('coach')}</th><th>${App.t('subscribers_col')}</th><th>${App.t('revenue_col')}</th><th>${App.t('commission_pct')}</th><th>${App.t('commission_usd')}</th></tr></thead>
             <tbody>${coachList.map(c=>`<tr>
               <td>${c.name}</td><td>${c.subs}</td><td>${Currency.formatUSD(c.revenue)}</td>
-              <td>${c.commission}%</td><td>${Currency.formatUSD(c.revenue*c.commission/100)}</td>
+              <td>${c.commission}%</td><td>${Currency.formatUSD(c.due)}</td>
             </tr>`).join('')}</tbody>
           </table></div>`:`<p class="text-muted text-sm">${App.t('no_coach_assignments')}</p>`}
         </div>
@@ -403,10 +459,10 @@ const ReportsModule = (() => {
           <div class="chart-card-header">
             <div><div class="chart-title">${App.t('subscription_status_title')}</div></div>
           </div>
-          ${['active','expiring','expired'].map(st=>{
-            const count=subs.filter(s=>{if(st==='active')return !DateUtil.isExpired(s.endDate)&&!DateUtil.isExpiringSoon(s.endDate,7);if(st==='expiring')return DateUtil.isExpiringSoon(s.endDate,7);return DateUtil.isExpired(s.endDate);}).length;
-            const colors={active:'var(--success)',expiring:'var(--warning)',expired:'var(--danger)'};
-            const labels={active:App.t('active'),expiring:App.t('expiring_soon'),expired:App.t('expired')};
+          ${['active','expiring','expired','frozen'].map(st=>{
+            const count=subs.filter(s=>{if(st==='frozen')return !!s.frozen;if(s.frozen)return false;if(st==='active')return !DateUtil.isExpired(s.endDate)&&!DateUtil.isExpiringSoon(s.endDate);if(st==='expiring')return DateUtil.isExpiringSoon(s.endDate);return DateUtil.isExpired(s.endDate);}).length;
+            const colors={active:'var(--success)',expiring:'var(--warning)',expired:'var(--danger)',frozen:'#60a5fa'};
+            const labels={active:App.t('active'),expiring:App.t('expiring_soon'),expired:App.t('expired'),frozen:'❄ '+App.t('frozen_word')};
             return `<div class="rev-bar-row"><span class="rev-bar-label" style="color:${colors[st]}">${labels[st]}</span><div class="rev-bar-track"><div class="rev-bar-fill" style="width:${subs.length?Math.round(count/subs.length*100):0}%;background:${colors[st]}"></div></div><span class="rev-bar-value" style="color:${colors[st]}">${count}</span></div>`;
           }).join('')}
         </div>
@@ -418,7 +474,7 @@ const ReportsModule = (() => {
         </div>
         <div class="chart-card">
           <div class="chart-card-header">
-            <div><div class="chart-title">${App.t('revenue_mix_title')}</div><div class="chart-subtitle">${{month:App.t('period_this_month'),'3month':App.t('period_last_3_months'),year:App.t('period_this_year'),all:App.t('period_all_time')}[period]}</div></div>
+            <div><div class="chart-title">${App.t('revenue_mix_title')}</div><div class="chart-subtitle">${periodLabel}</div></div>
           </div>
           ${(()=>{
             const mixMax = Math.max(revenue, salesRev, courseRevenue, 1);
@@ -459,7 +515,7 @@ const ReportsModule = (() => {
     }
   }
 
-  return { render, loadReports };
+  return { render, loadReports, onPeriod };
 })();
 
 
@@ -487,6 +543,7 @@ const DietModule = (() => {
         <div class="search-input-wrap"><span class="search-icon">🔍</span>
           <input class="search-input" id="diet-search" placeholder="${t('search_by_subscriber')}" oninput="DietModule.onSearch(this.value)">
         </div>
+        ${FilterMemory.resetButton('diet')}
       </div>
       <div id="diet-plans-list"></div>
       ${buildModal()}`;
@@ -494,10 +551,13 @@ const DietModule = (() => {
     _subscribers = snap.docs.map(d=>({id:d.id,...d.data()}));
     const subSel=document.getElementById('dp-subscriber');
     if(subSel) _subscribers.forEach(s=>{const o=document.createElement('option');o.value=s.id;o.textContent=s.name;subSel.appendChild(o);});
+    FilterMemory.register('diet', { session: ['diet-search'], onReset: () => loadPlans() });
+    FilterMemory.restore('diet');
     await loadPlans();
   }
 
-  async function loadPlans(q='') {
+  async function loadPlans(q) {
+    if (q === undefined) q = document.getElementById('diet-search')?.value || ''; // keep the search after saves/deletes
     const snap = await _db.collection(COL.DIET_PLANS).orderBy('createdAt','desc').get();
     const plans = snap.docs.map(d=>({id:d.id,...d.data()}))
       .filter(p=>!q||p.subscriberName?.toLowerCase().includes(q.toLowerCase()));
@@ -532,7 +592,7 @@ const DietModule = (() => {
       </div>`).join('');
   }
 
-  const onSearch = debounce(v=>loadPlans(v),280);
+  const onSearch = debounce(v=>{ FilterMemory.save('diet'); loadPlans(v); },280);
 
   function buildModal(){
     return `<div class="modal-overlay" id="modal-diet">
@@ -868,7 +928,7 @@ const SettingsModule = (() => {
       </div>
       <div class="settings-layout">
         <div class="settings-nav">
-          ${[['gym','🏋️',t('gym_info_tab')],['currency','💰',t('currency_tab')],['whatsapp','💬',t('whatsapp_tab')]].map(([id,icon,label])=>
+          ${[['gym','🏋️',t('gym_info_tab')],['subs','⏳',t('subs_settings_tab')],['currency','💰',t('currency_tab')],['whatsapp','💬',t('whatsapp_tab')]].map(([id,icon,label])=>
             `<div class="settings-nav-item${id==='gym'?' active':''}" data-tab="${id}" onclick="SettingsModule.switchTab('${id}')">${icon} ${label}</div>`
           ).join('')}
         </div>
@@ -896,6 +956,28 @@ const SettingsModule = (() => {
           <div class="form-group"><label class="form-label">${App.t('whatsapp_number_lbl')}</label><input class="form-input" id="set-gym-wa" value="${gymData.whatsappNumber||''}"></div>
           <button class="btn btn-primary" onclick="SettingsModule.saveGym()">💾 ${App.t('save')}</button>
         </div>`;
+    } else if(tab==='subs'){
+      let days = AppSettings.expiringDays;
+      try{const d=await _db.collection(COL.SETTINGS).doc('global').get();if(d.exists&&d.data().expiringSoonDays!=null)days=d.data().expiringSoonDays;}catch(e){}
+      content.innerHTML=`
+        <div class="settings-card">
+          <div class="settings-card-title">⏳ ${App.t('expiring_setting_title')}</div>
+          <p class="text-muted" style="font-size:13px;margin:-4px 0 16px">${App.t('expiring_setting_desc')}</p>
+          <div class="exp-days-row">
+            <button type="button" class="btn btn-outline exp-step" onclick="SettingsModule.stepExpiring(-1)">−</button>
+            <div class="exp-days-box">
+              <input class="form-input" id="set-exp-days" type="number" min="1" max="90" step="1" value="${days}" oninput="SettingsModule.previewExpiring()">
+              <span>${App.t('days_word')}</span>
+            </div>
+            <button type="button" class="btn btn-outline exp-step" onclick="SettingsModule.stepExpiring(1)">+</button>
+          </div>
+          <div class="exp-chips">
+            ${[3,4,5,7,10,14,30].map(n=>`<button type="button" class="exp-chip" data-n="${n}" onclick="SettingsModule.setExpiring(${n})">${n}</button>`).join('')}
+          </div>
+          <div class="exp-preview" id="exp-preview"></div>
+          <button class="btn btn-primary" style="margin-top:16px" onclick="SettingsModule.saveExpiring()">💾 ${App.t('save')}</button>
+        </div>`;
+      previewExpiring();
     } else if(tab==='currency'){
       let rate = 89500;
       try{const d=await _db.collection(COL.SETTINGS).doc('global').get();if(d.exists)rate=d.data().dollarRate||89500;}catch(e){}
@@ -915,16 +997,8 @@ const SettingsModule = (() => {
           <button class="btn btn-primary" onclick="SettingsModule.saveRate()">${App.t('save_rate_btn')}</button>
         </div>`;
     } else if(tab==='whatsapp'){
-      let wa = {};
-      try{const d=await _db.collection(COL.SETTINGS).doc('global').get();if(d.exists)wa=d.data();}catch(e){}
-      content.innerHTML=`
-        <div class="settings-card">
-          <div class="settings-card-title">${App.t('whatsapp_ultramsg_title')}</div>
-          <div class="form-group"><label class="form-label">${App.t('ultramsg_instance_lbl')}</label><input class="form-input" id="set-wa-instance" value="${wa.ultraMsgInstance||''}"></div>
-          <div class="form-group"><label class="form-label">${App.t('ultramsg_token_lbl')}</label><input class="form-input" id="set-wa-token" type="password" value="${wa.ultraMsgToken||''}"></div>
-          <div class="form-group"><label class="form-label">${App.t('expiry_reminder_days_lbl')}</label><input class="form-input" id="set-wa-days" type="number" value="${wa.expiryReminderDays||7}"></div>
-          <button class="btn btn-primary" onclick="SettingsModule.saveWA()">💾 ${App.t('save')}</button>
-        </div>`;
+      content.innerHTML='<div class="page-loader"><div class="spinner"></div></div>';
+      await WaSettings.render(content,_db);
     }
   }
 
@@ -932,6 +1006,30 @@ const SettingsModule = (() => {
     try{
       await _db.collection(COL.SETTINGS).doc('global').set({gymName:document.getElementById('set-gym-name')?.value||'',gymPhone:document.getElementById('set-gym-phone')?.value||'',gymAddress:document.getElementById('set-gym-address')?.value||'',whatsappNumber:document.getElementById('set-gym-wa')?.value||'',updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
       Toast.success(App.t('saved'));
+    }catch(e){Toast.error(App.t('error_generic'));}
+  }
+
+  /* ── Expiring-soon window ── */
+  function _expVal(){
+    const v=Math.round(Number(document.getElementById('set-exp-days')?.value));
+    return Number.isFinite(v)?Math.min(90,Math.max(1,v)):AppSettings.expiringDays;
+  }
+  function setExpiring(n){const el=document.getElementById('set-exp-days');if(el){el.value=n;previewExpiring();}}
+  function stepExpiring(d){setExpiring(Math.min(90,Math.max(1,_expVal()+d)));}
+  function previewExpiring(){
+    const n=_expVal();
+    document.querySelectorAll('.exp-chip').forEach(c=>c.classList.toggle('active',Number(c.dataset.n)===n));
+    const el=document.getElementById('exp-preview'); if(!el) return;
+    const example=DateUtil.addDays(DateUtil.today(),n);
+    el.innerHTML=App.t('expiring_setting_example').replace('{n}',`<b>${n}</b>`).replace('{date}',`<b>${DateUtil.format(example)}</b>`);
+  }
+  async function saveExpiring(){
+    const n=_expVal();
+    try{
+      await _db.collection(COL.SETTINGS).doc('global').set({expiringSoonDays:n,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+      AppSettings.setExpiringDays(n);
+      document.getElementById('set-exp-days').value=n; previewExpiring();
+      Toast.success(App.t('expiring_setting_saved').replace('{n}',n));
     }catch(e){Toast.error(App.t('error_generic'));}
   }
 
@@ -951,7 +1049,7 @@ const SettingsModule = (() => {
     }catch(e){Toast.error(App.t('error_generic'));}
   }
 
-  return {render,switchTab,saveGym,saveRate,saveWA};
+  return {render,switchTab,saveGym,saveRate,saveExpiring,setExpiring,stepExpiring,previewExpiring,saveWA};
 })();
 
 
@@ -975,7 +1073,7 @@ const DashboardModule = (() => {
           <div class="activity-list" id="dash-activity"><div class="page-loader" style="min-height:80px"><div class="spinner"></div></div></div>
         </div>
         <div class="card">
-          <div class="card-title"><span class="card-title-icon">${Icon.render('warning')}</span> ${t('expiring_soon_lbl')}</div>
+          <div class="card-title"><span class="card-title-icon">${Icon.render('warning')}</span> ${t('expiring_soon_lbl').replace('{n}',AppSettings.expiringDays)}</div>
           <div id="dash-expiring"><div class="page-loader" style="min-height:80px"><div class="spinner"></div></div></div>
         </div>
       </div>`;
@@ -992,8 +1090,8 @@ const DashboardModule = (() => {
       ]);
 
       const subs = subScSnap.docs.map(d=>({id:d.id,...d.data()}));
-      const active = subs.filter(s=>!DateUtil.isExpired(s.endDate)).length;
-      const expiring = subs.filter(s=>DateUtil.isExpiringSoon(s.endDate,7));
+      const active = subs.filter(s=>!s.frozen&&!DateUtil.isExpired(s.endDate)).length;
+      const expiring = subs.filter(s=>!s.frozen&&DateUtil.isExpiringSoon(s.endDate));
       const revenue = subs.reduce((t,s)=>t+(s.amountPaid||0),0);
 
       document.getElementById('dash-kpis').innerHTML = [
@@ -1012,12 +1110,14 @@ const DashboardModule = (() => {
       const actEl=document.getElementById('dash-activity');
       const acts=actSnap.docs.map(d=>d.data());
       const actIcons={subscriber_added:'green',subscriber_updated:'gold',subscriber_deleted:'red',
-        subscription_added:'blue',subscription_updated:'gold',subscription_deleted:'red',payment_recorded:'green'};
+        subscription_added:'blue',subscription_updated:'gold',subscription_deleted:'red',payment_recorded:'green',
+        subscription_frozen:'blue',subscription_unfrozen:'green'};
       const actLabels={
         subscriber_added:App.t('tl_subscriber_created'), subscriber_updated:App.t('tl_subscriber_updated'),
         subscriber_deleted:App.t('tl_subscriber_deleted'), subscription_added:App.t('tl_new_subscription'),
         subscription_updated:App.t('tl_subscription_updated'), subscription_deleted:App.t('tl_subscription_cancelled'),
         payment_recorded:App.t('tl_payment_recorded'),
+        subscription_frozen:App.t('tl_subscription_frozen'), subscription_unfrozen:App.t('tl_subscription_unfrozen'),
       };
       actEl.innerHTML=acts.length?acts.map(a=>`
         <div class="activity-item">

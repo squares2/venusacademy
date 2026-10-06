@@ -1010,3 +1010,158 @@ body.lang-ar .toast { text-align: right; border-left: none; border-right: 3px so
     margin-top: 4px;
   }
 }
+
+/* ═══ PWA install button ═══ */
+.pwa-install-btn[hidden] { display: none !important; }
+.pwa-install-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  border: 1px solid var(--gold-400);
+  background: var(--gold-glow);
+  color: var(--gold-400);
+  border-radius: var(--radius-md);
+  font-weight: 600; font-size: 13px;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+.pwa-install-btn:hover { background: var(--gold-400); color: #111; }
+.pwa-install-top { height: 38px; padding: 0 12px; }
+.pwa-install-login { width: 100%; margin-top: 12px; padding: 11px 14px; font-size: 14px; }
+@media (max-width: 620px) {
+  .pwa-install-top { width: 32px; height: 32px; padding: 0; }
+  .pwa-install-top .pwa-install-label { display: none; }
+}
+
+/* iOS "Add to Home Screen" help */
+.pwa-help-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,.65); backdrop-filter: blur(4px);
+  display: none; align-items: flex-end; justify-content: center; padding: 16px;
+}
+.pwa-help-overlay.open { display: flex; }
+.pwa-help-card {
+  width: 100%; max-width: 380px;
+  background: var(--bg-card); border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg); padding: 22px 20px; text-align: center;
+  box-shadow: var(--shadow-card);
+}
+.pwa-help-icon { width: 56px; height: 56px; border-radius: 50%; margin: 0 auto 10px; display: block; }
+.pwa-help-title { font-weight: 700; color: var(--gold-400); margin-bottom: 8px; font-size: 16px; }
+.pwa-help-body { color: var(--text-secondary); font-size: 14px; line-height: 1.6; margin-bottom: 16px; }
+.pwa-help-body b { color: var(--text-primary); }
+.pwa-help-ok {
+  width: 100%; padding: 10px; border-radius: var(--radius-md); border: none; cursor: pointer;
+  background: var(--gold-400); color: #111; font-weight: 700;
+}
+
+
+/* ═══ Remembered filters — reset chip ═══ */
+.filter-reset-btn[hidden] { display: none !important; }
+.filter-reset-btn {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  color: var(--gold-400); border: 1px dashed var(--border-default);
+  border-radius: var(--radius-md);
+}
+.filter-reset-btn:hover { border-style: solid; background: var(--gold-glow); }
+@media (max-width: 620px) { .filter-reset-btn { width: 100%; justify-content: center; } }
+
+/* ═══ NetGuard — connection status ═══ */
+.ng-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 38px; padding: 0 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-card); border: 1px solid var(--border-subtle);
+  color: var(--text-secondary); font-size: 12.5px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; transition: all var(--transition);
+}
+.ng-pill:hover { border-color: var(--border-default); }
+.ng-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--success); position: relative; flex-shrink: 0; }
+.ng-pill-online .ng-dot { background: var(--success); box-shadow: 0 0 0 3px rgba(34,197,94,.15); }
+.ng-pill-slow   { color: var(--warning); border-color: rgba(245,158,11,.45); }
+.ng-pill-slow .ng-dot { background: var(--warning); }
+.ng-pill-offline { color: var(--danger); border-color: rgba(239,68,68,.55); background: rgba(239,68,68,.08); }
+.ng-pill-offline .ng-dot { background: var(--danger); }
+.ng-pill-reconnecting { color: var(--info, #60a5fa); }
+.ng-pill-reconnecting .ng-dot { background: transparent; border: 2px solid currentColor; border-top-color: transparent; animation: ngSpin .8s linear infinite; }
+.ng-pill-slow .ng-dot::after, .ng-pill-offline .ng-dot::after {
+  content: ''; position: absolute; inset: -5px; border-radius: 50%;
+  border: 2px solid currentColor; opacity: 0; animation: ngPing 1.6s ease-out infinite;
+}
+.ng-pill-online .ng-pill-label { color: var(--text-muted); }
+@keyframes ngPing { 0% { transform: scale(.5); opacity: .8; } 100% { transform: scale(1.5); opacity: 0; } }
+@keyframes ngSpin { to { transform: rotate(360deg); } }
+@media (max-width: 620px) {
+  .ng-pill { width: 32px; height: 32px; padding: 0; justify-content: center; }
+  .ng-pill .ng-pill-label { display: none; }
+}
+
+/* top progress line while something is being saved */
+.ng-progress {
+  position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 10050;
+  pointer-events: none; opacity: 0; transition: opacity .2s;
+  background: linear-gradient(90deg, transparent, var(--gold-400), transparent) 0 0 / 40% 100% no-repeat;
+  animation: ngSlide 1.1s linear infinite;
+}
+.ng-progress.open { opacity: 1; }
+.ng-progress.is-slow { background-image: linear-gradient(90deg, transparent, var(--warning), transparent); height: 4px; }
+@keyframes ngSlide { 0% { background-position: -40% 0; } 100% { background-position: 140% 0; } }
+
+/* banner */
+.ng-banner {
+  position: fixed; left: 50%; top: 12px; z-index: 10040;
+  transform: translate(-50%, -160%); opacity: 0; pointer-events: none;
+  display: flex; align-items: center; gap: 12px;
+  width: max-content; max-width: min(760px, calc(100vw - 20px));
+  padding: 10px 12px 10px 16px; border-radius: var(--radius-lg);
+  background: var(--bg-elevated); color: var(--text-primary);
+  border: 1px solid var(--border-default); box-shadow: 0 12px 36px rgba(0,0,0,.55);
+  font-size: 13.5px; line-height: 1.45;
+  transition: transform .28s ease, opacity .28s ease;
+}
+.ng-banner.open { transform: translate(-50%, 0); opacity: 1; pointer-events: auto; }
+.ng-banner-icon { font-size: 18px; flex-shrink: 0; }
+.ng-banner-text { flex: 1; }
+.ng-banner-text b { color: var(--gold-400); font-weight: 700; }
+.ng-banner-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.ng-banner.ng-offline { border-color: rgba(239,68,68,.6); background: linear-gradient(0deg, rgba(239,68,68,.10), rgba(239,68,68,.10)), var(--bg-elevated); }
+.ng-banner.ng-stuck   { border-color: rgba(239,68,68,.6); }
+.ng-banner.ng-slow, .ng-banner.ng-pending, .ng-banner.ng-loading { border-color: rgba(245,158,11,.55); }
+.ng-banner.ng-reconnecting { border-color: rgba(96,165,250,.55); }
+.ng-btn {
+  padding: 6px 12px; border-radius: 999px; border: 1px solid var(--gold-400);
+  background: var(--gold-400); color: #111; font-weight: 700; font-size: 12.5px; cursor: pointer; white-space: nowrap;
+}
+.ng-btn:hover { filter: brightness(1.08); }
+.ng-btn-ghost { background: transparent; color: var(--gold-400); }
+.ng-btn-x { background: transparent; border-color: transparent; color: var(--text-muted); padding: 6px 8px; }
+.ng-btn[hidden] { display: none; }
+@media (max-width: 620px) {
+  .ng-banner { top: auto; bottom: 12px; transform: translate(-50%, 160%); flex-wrap: wrap; width: calc(100vw - 20px); }
+  .ng-banner.open { transform: translate(-50%, 0); }
+  .ng-banner-actions { width: 100%; justify-content: flex-end; }
+}
+
+/* status popover */
+.ng-pop {
+  position: fixed; z-index: 10045; width: 260px; display: none;
+  padding: 12px 14px; border-radius: var(--radius-md);
+  background: var(--bg-elevated); border: 1px solid var(--border-default);
+  box-shadow: 0 12px 36px rgba(0,0,0,.55); font-size: 13px;
+}
+.ng-pop.open { display: block; }
+.ng-pop-row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border-subtle); color: var(--text-secondary); }
+.ng-pop-row b { color: var(--text-primary); }
+.ng-c-online { color: var(--success) !important; } .ng-c-slow { color: var(--warning) !important; }
+.ng-c-offline { color: var(--danger) !important; } .ng-c-reconnecting { color: var(--info, #60a5fa) !important; }
+.ng-pop-actions { display: flex; gap: 6px; margin-top: 10px; }
+.ng-pop-actions .ng-btn { flex: 1; }
+
+/* the button that started a save stays locked + spinning until it finishes */
+.ng-busy { position: relative; color: transparent !important; pointer-events: none; }
+.ng-busy > * { visibility: hidden; }
+.ng-busy::after {
+  content: ''; position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px;
+  border-radius: 50%; border: 2px solid rgba(255,255,255,.35); border-top-color: #fff;
+  animation: ngSpin .7s linear infinite;
+}
+.btn-outline.ng-busy::after, .btn-ghost.ng-busy::after { border-color: rgba(201,168,76,.35); border-top-color: var(--gold-400); }

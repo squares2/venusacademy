@@ -92,6 +92,7 @@ const CourseModule = (() => {
           <option value="active">${t('active')}</option>
           <option value="completed">${t('status_completed')}</option>
         </select>
+        ${FilterMemory.resetButton('courses')}
       </div>
       <div class="courses-grid" id="courses-grid"></div>
       <div class="table-footer" style="border-radius:var(--radius-md);border:1px solid var(--border-subtle);margin-top:16px">
@@ -101,6 +102,11 @@ const CourseModule = (() => {
       ${modalCreate()}
       ${modalWorkspace()}
     `;
+    FilterMemory.register('courses', {
+      persist: ['course-filter-status'], session: ['course-search'],
+      onReset: () => applyFilters(),
+    });
+    FilterMemory.restore('courses');
     await loadDeps();
     await loadData();
   }
@@ -119,11 +125,12 @@ const CourseModule = (() => {
     _all = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     const countEl = document.getElementById('course-count');
     if (countEl) countEl.textContent = `${_all.length} ${App.t(_all.length === 1 ? 'course_word' : 'courses_word')}`;
-    applyFilters();
+    applyFilters(true); // keep filters + page after saves/deletes
   }
 
   /* ── Search / Filter / Pagination ─────────────────── */
-  function applyFilters() {
+  function applyFilters(keepPage = false) {
+    FilterMemory.save('courses');
     const q = (document.getElementById('course-search')?.value || '').trim().toLowerCase();
     const status = document.getElementById('course-filter-status')?.value || '';
     _filtered = _all.filter(c => {
@@ -133,7 +140,7 @@ const CourseModule = (() => {
       const matchStatus = !status || courseStatus(c) === status;
       return matchQ && matchStatus;
     });
-    _page = 1;
+    if (!keepPage) _page = 1;
     renderGrid(_filtered);
   }
   const onSearch = debounce(() => applyFilters(), 280);

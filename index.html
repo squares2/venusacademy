@@ -88,6 +88,11 @@
 
         </form>
 
+        <!-- PWA install (shown only when the browser allows installing) -->
+        <button type="button" class="pwa-install-btn pwa-install-login" data-pwa-install hidden>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M5 21h14"/></svg><span class="pwa-install-label">Install Venus App</span>
+        </button>
+
         <!-- Language toggle inside login card -->
         <div class="auth-footer">
           <button
@@ -164,6 +169,16 @@
           <!-- Topbar actions -->
           <div class="topbar-actions">
 
+            <!-- Connection status (NetGuard) -->
+            <button type="button" class="ng-pill ng-pill-online" id="ng-pill" data-ng="pill">
+              <span class="ng-dot"></span><span class="ng-pill-label">Online</span>
+            </button>
+
+            <!-- PWA install (shown only when the browser allows installing) -->
+            <button type="button" class="pwa-install-btn pwa-install-top" data-pwa-install hidden title="Install App">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M5 21h14"/></svg><span class="pwa-install-label">Install App</span>
+            </button>
+
             <!-- Language toggle -->
             <button
               class="lang-toggle"
@@ -230,11 +245,13 @@
   ═══════════════════════════════════════════ -->
   <script src="scripts/firebase-config.js"></script>
   <script src="scripts/utils.js"></script>
+  <script src="scripts/netguard.js"></script>
   <script src="scripts/subscribers.js"></script>
   <script src="scripts/modules-a.js"></script>
   <script src="scripts/modules-b.js"></script>
   <script src="scripts/course.js"></script>
   <script src="scripts/backup.js"></script>
+  <script src="scripts/whatsapp.js"></script>
   <script src="scripts/app.js"></script>
 
   <!-- ── Minor inline inits ── -->
@@ -248,6 +265,78 @@
         navigator.serviceWorker.register('sw.js').catch(() => {});
       });
     }
+
+    // ── PWA install button ──────────────────────────────
+    (function () {
+      const isAr = () => document.body.classList.contains('lang-ar');
+      const txt = {
+        top:   () => isAr() ? 'تثبيت التطبيق' : 'Install App',
+        login: () => isAr() ? 'تثبيت تطبيق Venus' : 'Install Venus App',
+        iosTitle: () => isAr() ? 'تثبيت Venus على جهازك' : 'Install Venus on your device',
+        iosBody:  () => isAr()
+          ? 'اضغط زر المشاركة <b>⬆︎</b> في Safari، ثم اختر <b>«إضافة إلى الشاشة الرئيسية»</b>.'
+          : 'Tap the Share button <b>⬆︎</b> in Safari, then choose <b>“Add to Home Screen”</b>.',
+        ok: () => isAr() ? 'حسناً' : 'Got it',
+      };
+      const isStandalone = () =>
+        window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      let deferred = null;
+
+      const buttons = () => document.querySelectorAll('[data-pwa-install]');
+      function refresh() {
+        const show = !isStandalone() && (deferred || isIOS);
+        buttons().forEach(b => {
+          b.hidden = !show;
+          const lbl = b.querySelector('.pwa-install-label');
+          if (lbl) lbl.textContent = b.classList.contains('pwa-install-login') ? txt.login() : txt.top();
+          b.title = txt.top();
+        });
+      }
+
+      function showIOSHelp() {
+        let ov = document.getElementById('pwa-ios-help');
+        if (!ov) {
+          ov = document.createElement('div');
+          ov.id = 'pwa-ios-help';
+          ov.className = 'pwa-help-overlay';
+          ov.addEventListener('click', e => { if (e.target === ov || e.target.closest('[data-close]')) ov.classList.remove('open'); });
+          document.body.appendChild(ov);
+        }
+        ov.innerHTML = `<div class="pwa-help-card">
+            <img src="assets/icon-192.webp" alt="" class="pwa-help-icon">
+            <div class="pwa-help-title">${txt.iosTitle()}</div>
+            <div class="pwa-help-body">${txt.iosBody()}</div>
+            <button type="button" class="pwa-help-ok" data-close>${txt.ok()}</button>
+          </div>`;
+        ov.classList.add('open');
+      }
+
+      window.addEventListener('beforeinstallprompt', e => {
+        e.preventDefault();          // keep Chrome's mini-bar away; we show our own button
+        deferred = e;
+        refresh();
+      });
+      window.addEventListener('appinstalled', () => { deferred = null; refresh(); });
+
+      document.addEventListener('click', async e => {
+        const btn = e.target.closest('[data-pwa-install]');
+        if (!btn) return;
+        if (deferred) {
+          deferred.prompt();
+          try { await deferred.userChoice; } catch (_) {}
+          deferred = null;           // a prompt can only be used once
+          refresh();
+        } else if (isIOS) {
+          showIOSHelp();
+        }
+      });
+
+      // Keep labels in the current language (body class flips on language switch)
+      new MutationObserver(refresh).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+      refresh();
+    })();
   </script>
 
 </body>
