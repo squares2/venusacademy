@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Venus Gym – WhatsApp Sender",
+  "version": "1.0.0",
+  "description": "Sends the Venus Gym reminder queue through your own WhatsApp Web, one message at a time.",
+  "permissions": ["tabs", "storage"],
+  "host_permissions": ["https://web.whatsapp.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://venusgym-5c509.web.app/*",
+        "https://venusgym-5c509.firebaseapp.com/*",
+        "http://127.0.0.1/*",
+        "http://localhost/*"
+      ],
+      "js": ["bridge.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["wa.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+}
