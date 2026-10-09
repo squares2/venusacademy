@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Venus Gym – WhatsApp Sender",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Sends the Venus Gym reminder queue through your own WhatsApp Web, one message at a time.",
   "permissions": ["tabs", "storage"],
   "host_permissions": ["https://web.whatsapp.com/*"],
@@ -11,6 +11,7 @@
       "matches": [
         "https://venusgym-5c509.web.app/*",
         "https://venusgym-5c509.firebaseapp.com/*",
+        "https://squares2.github.io/*",
         "http://127.0.0.1/*",
         "http://localhost/*"
       ],

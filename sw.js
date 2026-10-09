@@ -2,28 +2,28 @@
 //  VENUS GYM — Service Worker (PWA)
 // ═══════════════════════════════════════════════════
 
-const CACHE_NAME = 'venus-gym-v20';
+const CACHE_NAME = 'venus-gym-v21';
 
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/assets/icon-192.webp',
-  '/assets/icon-512.webp',
-  '/styles/main.css',
-  '/styles/auth.css',
-  '/styles/modals.css',
-  '/styles/modules.css',
-  '/scripts/firebase-config.js',
-  '/scripts/utils.js',
-  '/scripts/netguard.js',
-  '/scripts/course.js',
-  '/scripts/backup.js',
-  '/scripts/whatsapp.js',
-  '/scripts/subscribers.js',
-  '/scripts/modules-a.js',
-  '/scripts/modules-b.js',
-  '/scripts/app.js',
+  './',
+  './index.html',
+  './manifest.json',
+  './assets/icon-192.webp',
+  './assets/icon-512.webp',
+  './styles/main.css',
+  './styles/auth.css',
+  './styles/modals.css',
+  './styles/modules.css',
+  './scripts/firebase-config.js',
+  './scripts/utils.js',
+  './scripts/netguard.js',
+  './scripts/course.js',
+  './scripts/backup.js',
+  './scripts/whatsapp.js',
+  './scripts/subscribers.js',
+  './scripts/modules-a.js',
+  './scripts/modules-b.js',
+  './scripts/app.js',
 ];
 
 // Install — cache static assets

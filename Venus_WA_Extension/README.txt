@@ -14,6 +14,7 @@ Use:
  • Keep the browser open and the computer awake while it sends.
  • Do not type in the WhatsApp Web tab while it is sending.
 
+The GitHub Pages address (https://squares2.github.io/...) is already included.
 If your app runs on another address (custom domain), add it to the
 "matches" list of bridge.js in manifest.json, then click "Reload" on the
 extension card.
