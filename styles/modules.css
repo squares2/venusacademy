@@ -1233,6 +1233,13 @@ body.lang-ar .debt-radar.is-collapsed .debt-caret { transform: rotate(90deg); }
 .wa-text { white-space: normal; font-size: 13px; line-height: 1.6; color: var(--text-secondary); background: rgba(0,0,0,.18); border-radius: 8px; padding: 9px 11px; }
 .wa-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .wa-del { margin-inline-start: auto; }
+.wa-item.is-selected { border-color: var(--gold-400); background: var(--gold-glow); }
+.wa-bulk { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 14px; border-radius: var(--radius-md); background: var(--bg-card); border: 1px solid var(--border-subtle); }
+.wa-bulk:empty { display: none; }
+.wa-bulk-all { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; cursor: pointer; }
+.wa-bulk-n { color: var(--gold-400); font-weight: 700; font-size: 13px; }
+.wa-bulk-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-inline-start: auto; }
+.wa-bulk-actions .btn[disabled] { opacity: .45; pointer-events: none; }
 .wa-edit-text { width: 100%; min-height: 160px; }
 
 /* ═══ Settings ▸ WhatsApp ═══ */
@@ -1260,3 +1267,7 @@ body.lang-ar .wa-switch input:checked + span::after { transform: translateX(-20p
 .wa-preview { margin: 6px 0 8px; }
 .wa-preview-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
 .wa-bubble { display: inline-block; max-width: 100%; padding: 9px 12px 10px; border-radius: 10px 10px 10px 2px; background: #005c4b; color: #e9edef; font-size: 13.5px; line-height: 1.55; white-space: normal; }
+
+/* Subscription form — end date "back to auto" link */
+.subf-end-auto { margin-inline-start: 8px; font-size: 11px; font-weight: 600; color: var(--gold-400); text-decoration: none; text-transform: none; letter-spacing: 0; }
+.subf-end-auto:hover { text-decoration: underline; }

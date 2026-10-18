@@ -525,6 +525,7 @@ const SubscriptionsModule = (() => {
       <div class="subs-bulk-bar" id="subs-bulk-bar" aria-live="polite">
         <div class="subs-bulk-count"><span id="subs-bulk-n">0</span> ${t('selected_word')}</div>
         <div class="subs-bulk-actions">
+          <button class="btn btn-success btn-sm" onclick="SubscriptionsModule.bulkPay()">💰 ${t('pay_btn')}</button>
           <button class="btn btn-outline btn-sm" onclick="SubscriptionsModule.bulkStartDate()">📅 ${t('bulk_change_start')}</button>
           <button class="btn btn-outline btn-sm" onclick="SubscriptionsModule.bulkCoach()">🏋️ ${t('bulk_change_coach')}</button>
           <button class="btn btn-outline btn-sm subs-bulk-freeze" onclick="SubscriptionsModule.bulkFreeze()">❄ ${t('freeze_word')}</button>
@@ -646,14 +647,7 @@ const SubscriptionsModule = (() => {
   async function loadData() {
     const snap = await _db.collection(COL.SUBSCRIPTIONS).orderBy('startDate','desc').get();
     _all = snap.docs.map(d=>({id:d.id,...d.data()}));
-    _all.forEach(s=>{
-      if(s.frozen) s._status='frozen';            // frozen overrides dates: not active, not expiring, no renewal
-      else if(DateUtil.isExpired(s.endDate)) s._status='expired';
-      else if(DateUtil.isExpiringSoon(s.endDate)) s._status='expiring';
-      else if(!(s.amountPaid>0) && (s.totalAmount||0)>0) s._status='unpaid';
-      else if((s.amountPaid||0)<(s.totalAmount||0)) s._status='partial';
-      else s._status='active';
-    });
+    _all.forEach(_computeStatus); // frozen overrides dates: not active, not expiring, no renewal
     const ids = new Set(_all.map(x=>x.id));
     _selected.forEach(id => { if (!ids.has(id)) _selected.delete(id); });
     buildDebtMap();
@@ -1089,8 +1083,11 @@ const SubscriptionsModule = (() => {
               <input class="form-input" id="subf-start" type="date" value="${DateUtil.today()}">
             </div>
             <div class="form-group" id="subf-end-group">
-              <label class="form-label">${t('end_date')} (auto)</label>
-              <input class="form-input" id="subf-end" type="date" readonly>
+              <label class="form-label">${t('end_date')} <span class="required">*</span>
+                <a href="#" id="subf-end-auto" class="subf-end-auto" style="display:none" onclick="event.preventDefault();SubscriptionsModule.resetEndDate()">↺ ${t('end_date_auto_btn')}</a></label>
+              <input class="form-input" id="subf-end" type="date">
+              <div class="text-muted" id="subf-end-hint" style="font-size:11px;margin-top:4px">${t('end_date_hint')}</div>
+              <div class="form-error-msg"></div>
             </div>
           </div>
           <div class="form-row cols-1">
@@ -1111,7 +1108,7 @@ const SubscriptionsModule = (() => {
         </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" onclick="Modal.close('modal-subscription')">${t('cancel')}</button>
-          <button class="btn btn-primary" onclick="SubscriptionsModule.save()">💾 ${t('save')}</button>
+          <button class="btn btn-primary" id="subf-save-btn" onclick="SubscriptionsModule.save()">💾 ${t('save')}</button>
         </div>
       </div>
     </div>`;
@@ -1134,8 +1131,10 @@ const SubscriptionsModule = (() => {
     if (subInput) subInput.value = subscriberName || '';
     if (subHidden) subHidden.value = subscriberId || '';
     hideSubscriberDropdown();
-    const calcEnd = bindDateAutoCalc();
+    _newId = _db.collection(COL.SUBSCRIPTIONS).doc().id; // fixed id for this form → a repeated save can never create a duplicate
+    bindDateAutoCalc();
     calcEnd();
+    _resetSaveBtn();
     Modal.open('modal-subscription');
   }
 
@@ -1161,6 +1160,9 @@ const SubscriptionsModule = (() => {
     if (subHidden) subHidden.value = s.subscriberId || '';
     hideSubscriberDropdown();
     bindDateAutoCalc(); // don't recalc — keep the stored end date until start/months are actually changed
+    let autoEnd = ''; try { if (s.startDate) autoEnd = DateUtil.addMonths(s.startDate, Number(s.months) || monthsBetween(s.startDate, s.endDate)); } catch(_) {}
+    _setEndManual(!!s.endDate && !!autoEnd && s.endDate !== autoEnd);
+    _resetSaveBtn();
     Modal.open('modal-subscription');
   }
 
@@ -1189,19 +1191,59 @@ const SubscriptionsModule = (() => {
     if (hint) hint.textContent = App.t(alreadyRenewed ? 'auto_renew_already' : 'auto_renew_hint');
   }
 
-  /* ── Auto end-date calc, bound once regardless of how many times the modal reopens ── */
+  /* ── End date: auto = start + months, but the operator may overwrite it.
+     Listeners are delegated on document (bound once). The old version bound
+     them to the form's elements once only, so after the page was rebuilt
+     (navigation, or NetGuard refreshing it after a weak connection came back)
+     changing the start date no longer updated the end date. Pure local
+     work — no network involved. ── */
   let _dateListenersBound = false;
-  function bindDateAutoCalc(){
+  function calcEnd(){
     const startEl=document.getElementById('subf-start');
     const monthsEl=document.getElementById('subf-months');
     const endEl=document.getElementById('subf-end');
-    const calcEnd=()=>{if(startEl.value&&monthsEl.value)endEl.value=DateUtil.addMonths(startEl.value,Number(monthsEl.value));};
-    if(!_dateListenersBound){
-      startEl.addEventListener('change',calcEnd);
-      monthsEl.addEventListener('change',calcEnd);
-      _dateListenersBound = true;
+    if(!startEl||!monthsEl||!endEl) return;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(startEl.value) && monthsEl.value){
+      try { endEl.value = DateUtil.addMonths(startEl.value, Number(monthsEl.value)); } catch(_) {}
     }
+    _setEndManual(false);
+  }
+  function _setEndManual(on){
+    const endEl=document.getElementById('subf-end'); if(!endEl) return;
+    if(on) endEl.dataset.manual='1'; else delete endEl.dataset.manual;
+    const a=document.getElementById('subf-end-auto'); if(a) a.style.display = on ? '' : 'none';
+    const h=document.getElementById('subf-end-hint'); if(h) h.textContent = App.t(on ? 'end_date_manual_hint' : 'end_date_hint');
+    endEl.classList.remove('error');
+  }
+  function resetEndDate(){ calcEnd(); }
+  function bindDateAutoCalc(){
+    if(_dateListenersBound) return calcEnd;
+    _dateListenersBound = true;
+    const onEvt = e => {
+      const id = e.target && e.target.id;
+      if(id==='subf-start' || id==='subf-months') calcEnd();
+      else if(id==='subf-end') _setEndManual(true);
+    };
+    document.addEventListener('change', onEvt);
+    document.addEventListener('input', e => { if(e.target && e.target.id==='subf-end') _setEndManual(true); });
     return calcEnd;
+  }
+
+  let _newId = null, _saving = false;
+  // NetGuard locks the button while a write is pending; a fresh form must start unlocked
+  function _resetSaveBtn(){
+    _saving = false;
+    const b=document.getElementById('subf-save-btn');
+    if(b){ b.disabled=false; b.classList.remove('ng-busy'); b.removeAttribute('aria-busy'); }
+  }
+  function _computeStatus(s){
+    if(s.frozen) s._status='frozen';
+    else if(DateUtil.isExpired(s.endDate)) s._status='expired';
+    else if(DateUtil.isExpiringSoon(s.endDate)) s._status='expiring';
+    else if(!(s.amountPaid>0) && (s.totalAmount||0)>0) s._status='unpaid';
+    else if((s.amountPaid||0)<(s.totalAmount||0)) s._status='partial';
+    else s._status='active';
+    return s;
   }
 
   async function save(){
@@ -1215,6 +1257,15 @@ const SubscriptionsModule = (() => {
     const subHidden = document.getElementById('subf-subscriber');
     if (subInput) subInput.classList.toggle('error', subHidden?.classList.contains('error'));
     if (!valid) return;
+    const endEl=document.getElementById('subf-end');
+    const startV=document.getElementById('subf-start').value;
+    if(!endEl.value || endEl.value <= startV){
+      endEl.classList.add('error');
+      const msg=endEl.parentElement.querySelector('.form-error-msg'); if(msg) msg.textContent=App.t('end_before_start');
+      endEl.focus(); return;
+    }
+    const em=endEl.parentElement.querySelector('.form-error-msg'); if(em) em.textContent='';
+    if (_saving) return;
     const subId=document.getElementById('subf-subscriber').value;
     const spId=document.getElementById('subf-sport').value;
     const coId=document.getElementById('subf-coach').value;
@@ -1237,21 +1288,47 @@ const SubscriptionsModule = (() => {
       autoRenew:!!document.getElementById('subf-autorenew')?.checked,
       notes:document.getElementById('subf-notes').value.trim(),
     };
+    /* Don't wait for the server: Firestore applies the write locally at once and
+       sends it when the line allows (NetGuard shows it as pending and warns before
+       a reload). The form closes immediately so a weak connection never freezes it. */
+    _saving = true;
+    const editId = _editId;
+    const id = editId || _newId || _db.collection(COL.SUBSCRIPTIONS).doc().id;
+    const before = editId ? _all.find(x=>x.id===editId) : null;
+    let write;
     try{
-      if(_editId){
-        const before=_all.find(x=>x.id===_editId);
-        await _db.collection(COL.SUBSCRIPTIONS).doc(_editId).update(data);
-        const paidMore=(data.amountPaid||0)-(before?.amountPaid||0);
-        if(paidMore>0 && typeof WaQueue!=='undefined') WaQueue.onPayment(_db,{...data,id:_editId},paidMore);
-        await logActivity(_db,'subscription_updated',{subscriber:data.subscriberName,subscriberId:data.subscriberId,sport:data.sportName,amount:data.totalAmount,paid:data.amountPaid});
+      if(editId){
+        write = _db.collection(COL.SUBSCRIPTIONS).doc(id).update(data);
       } else {
-        data.createdAt=firebase.firestore.FieldValue.serverTimestamp();
-        const newRef = await _db.collection(COL.SUBSCRIPTIONS).add(data);
-        if((data.amountPaid||0)>0 && typeof WaQueue!=='undefined') WaQueue.onPayment(_db,{...data,id:newRef.id},data.amountPaid);
-        await logActivity(_db,'subscription_added',{subscriber:data.subscriberName,subscriberId:data.subscriberId,sport:data.sportName,amount:data.totalAmount,paid:data.amountPaid});
+        write = _db.collection(COL.SUBSCRIPTIONS).doc(id).set({...data, createdAt:firebase.firestore.FieldValue.serverTimestamp()});
       }
-      Toast.success(App.t('saved')); Modal.close('modal-subscription'); await loadData();
-    }catch(e){Toast.error(App.t('error_generic'));}
+    }catch(e){ console.error(e); _saving=false; Toast.error(App.t('error_generic')); return; }
+
+    // update the table right away from what we just wrote
+    const local = _computeStatus({ ...(before||{}), ...data, id });
+    const i = _all.findIndex(x=>x.id===id);
+    if(i>=0) _all[i]=local; else _all.unshift(local);
+    _newId = null;
+    Modal.close('modal-subscription');
+    try { buildDebtMap(); renderDebtPanel(); renderTable(getFiltered()); } catch(_) {}
+
+    write.then(() => {
+      if(editId){
+        const paidMore=(data.amountPaid||0)-(before?.amountPaid||0);
+        if(paidMore>0 && typeof WaQueue!=='undefined') WaQueue.onPayment(_db,{...data,id},paidMore);
+        logActivity(_db,'subscription_updated',{subscriber:data.subscriberName,subscriberId:data.subscriberId,sport:data.sportName,amount:data.totalAmount,paid:data.amountPaid});
+      } else {
+        if((data.amountPaid||0)>0 && typeof WaQueue!=='undefined') WaQueue.onPayment(_db,{...data,id},data.amountPaid);
+        logActivity(_db,'subscription_added',{subscriber:data.subscriberName,subscriberId:data.subscriberId,sport:data.sportName,amount:data.totalAmount,paid:data.amountPaid});
+      }
+      Toast.success(App.t('saved'));
+      if(document.getElementById('subs-tbody')) loadData().catch(()=>{});
+    }).catch(e => {
+      console.error('Subscription save failed', e);
+      Toast.error(App.t('error_generic'));
+      if(document.getElementById('subs-tbody')) loadData().catch(()=>{});
+    }).finally(() => { _saving = false; });
+    _saving = false; // the form is closed; a new one may be opened right away
   }
 
   /* ── Auto-renewal ──────────────────────────────────
@@ -1779,6 +1856,41 @@ const SubscriptionsModule = (() => {
   }
 
   /* ── Bulk: delete ── */
+  /* ── Bulk: pay remaining balance of every selected unpaid/partial subscription ── */
+  function bulkPay() {
+    const all = _selItems(); if (!all.length) return;
+    const items = all.filter(x => _rem(x) > 0);
+    const skipped = all.length - items.length;
+    if (!items.length) return Toast.info(App.t('bulk_pay_none'));
+    const owed = items.reduce((a, x) => a + _rem(x), 0);
+    const rows = items.map(x => `
+      <div class="subs-bulk-prow">
+        <span class="subs-bulk-pname">${x.subscriberName||'—'} <small>${x.sportName||''} · ${DateUtil.format(x.startDate)}</small></span>
+        <span class="subs-bulk-pdates"><b>${Currency.formatUSD(_rem(x))}</b></span>
+      </div>`).join('');
+    _bulkModal({
+      title: `💰 ${App.t('record_payment_title')}`,
+      confirmClass: 'btn-success',
+      confirmText: `${App.t('confirm_payment_btn')} (${items.length})`,
+      body: `
+        ${_selSummary(items)}
+        <div style="text-align:center;margin:6px 0 12px">
+          <div class="text-muted" style="font-size:12px">${App.t('bulk_pay_total')}</div>
+          <div style="font-size:24px;font-weight:700;color:var(--success)">${Currency.formatUSD(owed)}</div>
+        </div>
+        <div class="subs-bulk-preview">${rows}</div>
+        ${skipped ? `<div class="subs-bulk-warn" style="margin-top:10px">ℹ️ ${skipped} ${App.t('bulk_pay_skipped')}</div>` : ''}`,
+      onConfirm: async () => {
+        await _commitInChunks(items, (b, ref, x) => b.update(ref, { amountPaid: x.totalAmount || 0, paymentMethod: 'paid' }));
+        await Promise.all(items.map(x => logActivity(_db, 'payment_recorded', { subscriber: x.subscriberName, subscriberId: x.subscriberId, sport: x.sportName, amount: _rem(x) })));
+        if (typeof WaQueue !== 'undefined') items.forEach(x => WaQueue.onPayment(_db, { ...x, amountPaid: x.totalAmount || 0 }, _rem(x)));
+        Toast.success(`${App.t('payment_recorded')} · ${items.length} · ${Currency.formatUSD(owed)}`);
+        items.forEach(x => _selected.delete(x.id));
+        await loadData();
+      },
+    });
+  }
+
   function bulkDelete() {
     const items = _selItems(); if (!items.length) return;
     const names = [...new Set(items.map(x => x.subscriberName || '—'))];
@@ -1807,8 +1919,8 @@ const SubscriptionsModule = (() => {
     }});
   }
 
-  return {render,openNew,openEdit,save,payRemaining,del,
-           toggleSelect,selectGroup,selectPage,clearSelection,bulkStartDate,bulkCoach,bulkDelete,
+  return {render,openNew,openEdit,save,resetEndDate,payRemaining,del,
+           toggleSelect,selectGroup,selectPage,clearSelection,bulkStartDate,bulkCoach,bulkDelete,bulkPay,
            openFreeze,openUnfreeze,bulkFreeze,bulkUnfreeze,
            toggleDebtPanel,refreshDebtPanel:()=>renderDebtPanel(),debtToggleAll,debtFilter,debtView,debtRemind,debtSettle,onSearch,onFilter,onDateFilter,goPage,toggleGroup,toggleAllGroups,processAutoRenewals,
            onSubscriberSearch,selectSubscriber,hideSubscriberDropdown,

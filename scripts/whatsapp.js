@@ -39,6 +39,9 @@ const WaI18n = (() => {
     install_4: 'Open <b>web.whatsapp.com</b> and link the gym phone by scanning the QR code.',
     install_5: 'Reload this page — the badge above turns green.',
     tip: 'Keep Chrome open and the computer awake while sending. Messages go out slowly on purpose (random pause between each) to look natural.',
+    sel_all: 'Select all', selected: 'selected', send_sel: 'Send selected', skip_sel: 'Skip', retry_sel: 'Move to pending', del_sel: 'Delete',
+    del_sel_title: 'Delete messages', del_sel_msg: 'Delete {n} selected message(s)? This cannot be undone.',
+    bulk_done: 'message(s) updated', bulk_deleted: 'message(s) deleted', sending_sel: 'Sending only the selected messages…',
     // settings
     s_title: 'WhatsApp messages', s_sender: 'Sender', s_daily: 'Daily limit (messages)', s_min: 'Min pause (seconds)', s_max: 'Max pause (seconds)',
     s_unpaid_every: 'Repeat unpaid reminder every (days)', s_autoscan: 'Check for new reminders automatically when the app opens',
@@ -79,6 +82,9 @@ const WaI18n = (() => {
     install_4: 'افتح <b>web.whatsapp.com</b> واربط هاتف النادي بمسح رمز QR.',
     install_5: 'أعد تحميل هذه الصفحة — ستتحول الشارة أعلاه إلى الأخضر.',
     tip: 'أبقِ المتصفح مفتوحاً والكمبيوتر يعمل أثناء الإرسال. الرسائل تُرسل ببطء عمداً (توقف عشوائي بين كل رسالة) لتبدو طبيعية.',
+    sel_all: 'تحديد الكل', selected: 'محدد', send_sel: 'إرسال المحدد', skip_sel: 'تخطي', retry_sel: 'إرجاع للانتظار', del_sel: 'حذف',
+    del_sel_title: 'حذف الرسائل', del_sel_msg: 'حذف {n} رسالة/رسائل محددة؟ لا يمكن التراجع عن ذلك.',
+    bulk_done: 'رسالة/رسائل تم تحديثها', bulk_deleted: 'رسالة/رسائل تم حذفها', sending_sel: 'جارٍ إرسال الرسائل المحددة فقط…',
     s_title: 'رسائل واتساب', s_sender: 'المُرسِل', s_daily: 'الحد اليومي (رسائل)', s_min: 'أقل توقف (ثوانٍ)', s_max: 'أكثر توقف (ثوانٍ)',
     s_unpaid_every: 'تكرار تذكير الرصيد كل (أيام)', s_autoscan: 'البحث عن تذكيرات جديدة تلقائياً عند فتح التطبيق',
     s_types: 'أنواع الرسائل', s_active: 'مفعّل', s_inactive: 'غير مفعّل', s_template: 'نص الرسالة', s_placeholders: 'اضغط للإدراج:',
@@ -338,8 +344,17 @@ const WaSender = (() => {
     _nextAt = 0; emit();
   }
 
-  async function start(db) {
+  // ids (optional): send only these queue items, in the given order
+  async function start(db, ids) {
     if (_running) return;
+    const only = Array.isArray(ids) ? ids.slice() : null;
+    const nextFromIds = async () => {
+      while (only.length) {
+        const d = await db.collection(WaQueue.COL_Q).doc(only.shift()).get();
+        if (d.exists && d.data().status === 'pending') return { id: d.id, ...d.data() };
+      }
+      return null;
+    };
     if (!extVersion()) { Toast.error(L('ext_missing')); return; }
     _running = true; _stop = false; _paused = ''; _sentRun = 0; _failedRun = 0; emit();
     let fails = 0;
@@ -350,7 +365,7 @@ const WaSender = (() => {
       const minD = Math.max(5, Number(s.sender.minDelay) || 30), maxD = Math.max(minD, Number(s.sender.maxDelay) || 90);
       while (!_stop) {
         if (budget <= 0) { _paused = 'limit'; break; }
-        const item = await WaQueue.nextPending(db);
+        const item = only ? await nextFromIds() : await WaQueue.nextPending(db);
         if (!item) { if (_sentRun || _failedRun) Toast.success(L('done_all')); break; }
         _current = item; emit();
         await WaQueue.mark(db, item.id, { status: 'sending' });
@@ -391,6 +406,7 @@ const WaSender = (() => {
 /* ═══════════════════════════════════════════════════ */
 const WaPage = (() => {
   const L = WaI18n.t;
+  let _sel = new Set();
   let _db, _items = [], _tab = 'pending', _unsubSnap = null, _unsubSender = null, _tick = null, _waTab = false, _sentToday = 0, _limit = 40;
   const TYPE_ICON = { expiring: '⏳', unpaid: '💸', renewal: '🔁', payment: '✅' };
 
@@ -414,7 +430,7 @@ const WaPage = (() => {
       <div class="wa-list" id="wa-list"><div class="page-loader"><div class="spinner"></div></div></div>`;
 
     cleanup();
-    _unsubSender = WaSender.subscribe(() => { renderControl(); renderStatus(); });
+    _unsubSender = WaSender.subscribe(() => { renderControl(); renderStatus(); renderBulk(); });
     _tick = setInterval(() => { if (!document.getElementById('wa-control')) return cleanup(); if (WaSender.state.nextAt) renderControl(); }, 1000);
     _unsubSnap = db.collection(WaQueue.COL_Q).orderBy('createdAt', 'desc').limit(400).onSnapshot(snap => {
       if (!document.getElementById('wa-list')) return cleanup();
@@ -496,10 +512,12 @@ const WaPage = (() => {
 
   function renderList() {
     const el = document.getElementById('wa-list'); if (!el) return;
-    const list = _items.filter(x => x.status === _tab || (_tab === 'pending' && x.status === 'sending'));
+    const list = _tabList();
+    const ids = new Set(_selectable().map(x => x.id));
+    _sel.forEach(id => { if (!ids.has(id)) _sel.delete(id); });
     if (!list.length) { el.innerHTML = `<p class="text-muted" style="padding:24px 4px">${L('empty')}</p>`; return; }
     const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
-    el.innerHTML = list.map(x => {
+    el.innerHTML = `<div class="wa-bulk" id="wa-bulk"></div>` + list.map(x => {
       const err = x.error ? `<span class="wa-err">${L('err_' + x.error) !== 'err_' + x.error ? L('err_' + x.error) : esc(x.error)}</span>` : '';
       const when = x.sentAt?.toDate?.() || x.createdAt?.toDate?.();
       const manual = x.phone ? `<a class="btn btn-ghost btn-sm" target="_blank" href="https://wa.me/${x.phone}?text=${encodeURIComponent(x.text || '')}">💬 ${L('manual')}</a>` : '';
@@ -514,8 +532,9 @@ const WaPage = (() => {
         skipped: `${x.phone ? `<button class="btn btn-outline btn-sm" onclick="WaPage.setStatus('${x.id}','pending')">↻ ${L('retry')}</button>` : ''}${manual}`,
       }[x.status] || '';
       return `
-        <div class="wa-item wa-${x.status}">
+        <div class="wa-item wa-${x.status} ${_sel.has(x.id) ? 'is-selected' : ''}" data-wid="${x.id}">
           <div class="wa-item-head">
+            ${x.status === 'sending' ? '' : `<input type="checkbox" class="subs-cb wa-cb" data-id="${x.id}" ${_sel.has(x.id) ? 'checked' : ''} onchange="WaPage.toggleSel('${x.id}',this.checked)">`}
             <span class="wa-type wa-type-${x.type}">${TYPE_ICON[x.type] || '💬'} ${L('type_' + x.type)}</span>
             <b class="wa-name">${esc(x.name) || '—'}</b>
             <span class="wa-phone">${x.phone ? '+' + x.phone : ''}</span>
@@ -527,9 +546,93 @@ const WaPage = (() => {
           <div class="wa-actions">${actions}<button class="btn btn-ghost btn-sm wa-del" title="${L('del')}" onclick="WaPage.remove('${x.id}')">🗑</button></div>
         </div>`;
     }).join('');
+    renderBulk();
   }
 
-  function setTab(t) { _tab = t; renderTabs(); renderList(); }
+  /* ── Multi-select ─────────────────────────────────── */
+  const _tabList = () => _items.filter(x => x.status === _tab || (_tab === 'pending' && x.status === 'sending'));
+  const _selectable = () => _tabList().filter(x => x.status !== 'sending');
+  const _selItems = () => _selectable().filter(x => _sel.has(x.id));
+
+  function renderBulk() {
+    const el = document.getElementById('wa-bulk'); if (!el) return;
+    const all = _selectable(), n = _selItems().length, dis = n ? '' : 'disabled';
+    document.querySelectorAll('#wa-list .wa-item[data-wid]').forEach(it => {
+      const on = _sel.has(it.dataset.wid);
+      it.classList.toggle('is-selected', on);
+      const cb = it.querySelector('.wa-cb'); if (cb) cb.checked = on;
+    });
+    if (!all.length) { el.innerHTML = ''; return; }
+    const running = WaSender.state.running;
+    const acts = {
+      pending: `<button class="btn btn-primary btn-sm" ${n && !running ? '' : 'disabled'} onclick="WaPage.sendSelected()">▶ ${L('send_sel')}</button>
+                <button class="btn btn-outline btn-sm" ${dis} onclick="WaPage.bulkStatus('skipped')">⤼ ${L('skip_sel')}</button>`,
+      failed:  `<button class="btn btn-outline btn-sm" ${dis} onclick="WaPage.bulkStatus('pending')">↻ ${L('retry_sel')}</button>`,
+      skipped: `<button class="btn btn-outline btn-sm" ${dis} onclick="WaPage.bulkStatus('pending')">↻ ${L('retry_sel')}</button>`,
+      sent: '',
+    }[_tab] || '';
+    el.innerHTML = `
+      <label class="wa-bulk-all">
+        <input type="checkbox" class="subs-cb" id="wa-sel-all" ${n && n === all.length ? 'checked' : ''} onchange="WaPage.selectAll(this.checked)">
+        ${L('sel_all')} (${all.length})
+      </label>
+      <span class="wa-bulk-n">${n} ${L('selected')}</span>
+      <div class="wa-bulk-actions">
+        ${acts}
+        <button class="btn btn-danger btn-sm" ${dis} onclick="WaPage.bulkDelete()">🗑 ${L('del_sel')}</button>
+        ${n ? `<button class="btn btn-ghost btn-sm" title="✕" onclick="WaPage.selectAll(false)">✕</button>` : ''}
+      </div>`;
+    const cbAll = el.querySelector('#wa-sel-all');
+    if (cbAll) cbAll.indeterminate = n > 0 && n < all.length;
+  }
+
+  function toggleSel(id, on) { on ? _sel.add(id) : _sel.delete(id); renderBulk(); }
+  function selectAll(on) { _sel.clear(); if (on) _selectable().forEach(x => _sel.add(x.id)); renderBulk(); }
+
+  async function _commit(items, apply) {
+    for (let i = 0; i < items.length; i += 400) {
+      const b = _db.batch();
+      items.slice(i, i + 400).forEach(x => apply(b, _db.collection(WaQueue.COL_Q).doc(x.id)));
+      await b.commit();
+    }
+  }
+
+  async function bulkStatus(status) {
+    const items = _selItems(); if (!items.length) return;
+    try {
+      await _commit(items, (b, ref) => b.update(ref, { status, error: null }));
+      _sel.clear();
+      Toast.success(`${items.length} ${L('bulk_done')}`);
+    } catch (e) { console.error(e); Toast.error(App.t('error_generic')); }
+  }
+
+  function bulkDelete() {
+    const items = _selItems(); if (!items.length) return;
+    Modal.confirm({
+      title: L('del_sel_title'),
+      message: L('del_sel_msg').replace('{n}', `<strong>${items.length}</strong>`),
+      type: 'danger', confirmText: `${L('del_sel')} (${items.length})`,
+      onConfirm: async () => {
+        try {
+          await _commit(items, (b, ref) => b.delete(ref));
+          _sel.clear();
+          Toast.success(`${items.length} ${L('bulk_deleted')}`);
+        } catch (e) { console.error(e); Toast.error(App.t('error_generic')); }
+      },
+    });
+  }
+
+  function sendSelected() {
+    if (WaSender.state.running) return;
+    const ts = d => d.createdAt?.toMillis?.() || 0;
+    const ids = _selItems().filter(x => x.status === 'pending').sort((a, b) => ts(a) - ts(b)).map(x => x.id);
+    if (!ids.length) return;
+    _sel.clear(); renderBulk();
+    Toast.info(L('sending_sel'));
+    WaSender.start(_db, ids).then(refreshExt);
+  }
+
+  function setTab(t) { if (t !== _tab) _sel.clear(); _tab = t; renderTabs(); renderList(); }
   function start() { WaSender.start(_db).then(refreshExt); }
   async function scanNow(btn) {
     try { localStorage.removeItem('venus_wa_scan'); } catch (_) {}
@@ -564,7 +667,8 @@ const WaPage = (() => {
     Modal.open('modal-wa-edit');
   }
 
-  return { render, setTab, start, scanNow, setStatus, markSent, remove, edit };
+  return { render, setTab, start, scanNow, setStatus, markSent, remove, edit,
+           toggleSel, selectAll, bulkStatus, bulkDelete, sendSelected };
 })();
 
 /* ═══════════════════════════════════════════════════ */
