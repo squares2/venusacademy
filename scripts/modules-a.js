@@ -76,7 +76,7 @@ const CoachesModule = (() => {
               </div>
               <div class="form-group">
                 <label class="form-label">${t('phone')} <span class="required">*</span></label>
-                <input class="form-input" id="cf-phone">
+                <input class="form-input" id="cf-phone" data-phone>
                 <div class="form-error-msg"></div>
               </div>
             </div>
@@ -154,7 +154,7 @@ const CoachesModule = (() => {
           <div class="avatar avatar-lg">${initials(c.name)}</div>
           <div class="coach-card-info">
             <div class="coach-card-name">${c.name}</div>
-            <div class="coach-card-sport">📞 ${c.phone || '—'} · ${App.t('commission')}: <span style="color:var(--gold-400)">${c.commission||0}%</span></div>
+            <div class="coach-card-sport">📞 ${(typeof PhoneInput!=='undefined'?PhoneInput.display(c.phone,{empty:'—',small:true}):(c.phone||''))} · ${App.t('commission')}: <span style="color:var(--gold-400)">${c.commission||0}%</span></div>
           </div>
         </div>
         <div class="coach-specialty-tags">${tags || `<span class="text-muted text-sm">${App.t('no_sports_assigned')}</span>`}</div>
@@ -578,12 +578,12 @@ const SubscriptionsModule = (() => {
     if (!dd) return;
     const q = (query || '').trim().toLowerCase();
     const matches = !q ? _subscribers
-      : _subscribers.filter(s => s.name?.toLowerCase().includes(q) || s.phone?.includes(q));
+      : _subscribers.filter(s => s.name?.toLowerCase().includes(q) || (typeof PhoneInput!=='undefined'?PhoneInput.matches(s.phone,q):s.phone?.includes(q)));
     dd.innerHTML = matches.length
       ? matches.slice(0, 50).map(s => {
           const esc = (s.name || '').replace(/'/g, "\\'");
           return `<div class="combo-item" onmousedown="event.preventDefault();SubscriptionsModule.selectSubscriber('${s.id}','${esc}')">
-            <span>${s.name}</span>${s.phone ? `<span class="combo-item-sub">${s.phone}</span>` : ''}
+            <span>${s.name}</span>${s.phone ? `<span class="combo-item-sub">${(typeof PhoneInput!=='undefined'?PhoneInput.display(s.phone,{small:true}):(s.phone||''))}</span>` : ''}
           </div>`;
         }).join('')
       : `<div class="combo-item combo-empty">${App.t('no_matching_subscribers')}</div>`;
@@ -912,7 +912,7 @@ const SubscriptionsModule = (() => {
     const q = (query || '').trim().toLowerCase();
 
     const subMatches = (!q ? _subscribers
-      : _subscribers.filter(s => s.name?.toLowerCase().includes(q) || s.phone?.includes(q))
+      : _subscribers.filter(s => s.name?.toLowerCase().includes(q) || (typeof PhoneInput!=='undefined'?PhoneInput.matches(s.phone,q):s.phone?.includes(q)))
     ).slice(0, 6);
     const sportMatches = (!q ? _sports
       : _sports.filter(sp => sp.name?.toLowerCase().includes(q))
@@ -930,7 +930,7 @@ const SubscriptionsModule = (() => {
       html += subMatches.map(s => {
         const esc = (s.name || '').replace(/'/g, "\\'");
         return `<div class="combo-item" onmousedown="event.preventDefault();SubscriptionsModule.selectSearchTerm('${esc}')">
-          <span>${s.name}</span>${s.phone ? `<span class="combo-item-sub">${s.phone}</span>` : ''}
+          <span>${s.name}</span>${s.phone ? `<span class="combo-item-sub">${(typeof PhoneInput!=='undefined'?PhoneInput.display(s.phone,{small:true}):(s.phone||''))}</span>` : ''}
         </div>`;
       }).join('');
     }
@@ -1465,7 +1465,7 @@ const SubscriptionsModule = (() => {
   }
 
   const _initials = n => (n||'?').trim().split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase();
-  const _monthLbl = d => { try { return new Date(d).toLocaleDateString(document.body.classList.contains('lang-ar') ? 'ar' : 'en', { month:'short', year:'2-digit' }); } catch(_) { return d; } };
+  const _monthLbl = d => DateUtil.formatMonth(d);
   const _daysSince = d => d ? Math.max(0, Math.floor((Date.now() - new Date(d).getTime()) / 86400000)) : 0;
 
   function _debtPanelOpen() { try { return localStorage.getItem('venus_debt_panel') !== 'closed'; } catch(_) { return true; } }
@@ -1559,16 +1559,17 @@ const SubscriptionsModule = (() => {
     document.getElementById('subs-tbody')?.closest('.table-wrap')?.scrollIntoView({ behavior:'smooth', block:'start' });
   }
 
-  function debtRemind(k) {
+  // "Remind" → queue the message in WhatsApp Sender (sent later with the other messages) instead of opening WhatsApp Web
+  async function debtRemind(k) {
     const d = _debt.get(decodeURIComponent(k)); if (!d) return;
     const phone = _subscribers.find(x => x.id === d.subscriberId)?.phone;
-    if (!phone) return Toast.warning(App.t('no_phone_number'));
-    const ar = document.body.classList.contains('lang-ar');
-    const lines = d.items.map(x => `• ${x.sportName||''} — ${DateUtil.format(x.startDate)}: ${Currency.formatUSD(_rem(x))}`).join('\n');
-    const msg = ar
-      ? `مرحباً ${d.name}،\nتذكير ودّي من نادي Venus: لديك ${d.count} رسوم اشتراك غير مدفوعة بمجموع ${Currency.formatUSD(d.owed)}:\n${lines}\nشكراً لك 🙏`
-      : `Hello ${d.name},\nA friendly reminder from Venus Gym: you have ${d.count} unpaid subscription fees totalling ${Currency.formatUSD(d.owed)}:\n${lines}\nThank you 🙏`;
-    window.open(buildWhatsAppLink(phone, msg), '_blank');
+    if (!phone || typeof WaQueue === 'undefined') return Toast.warning(App.t('no_phone_number'));
+    try {
+      const r = await WaQueue.queueUnpaid(_db, { subscriberId: d.subscriberId, name: d.name, phone, items: d.items });
+      if (r === 'no_phone') return Toast.warning(App.t('no_phone_number'));
+      const open = `<a href="#" style="color:inherit;text-decoration:underline;margin-inline-start:6px" onclick="event.preventDefault();App.navigate('whatsapp')">${App.t('remind_open_sender')}</a>`;
+      Toast.show(`${App.t(r === 'updated' ? 'remind_queue_updated' : 'remind_queued').replace('{name}', d.name)}${open}`, 'success', 6000);
+    } catch (e) { console.error(e); Toast.error(App.t('error_generic')); }
   }
 
   function debtSettle(k) {

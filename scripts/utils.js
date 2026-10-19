@@ -37,8 +37,11 @@ const AppSettings = {
     const v = Math.round(Number(n));
     this.expiringDays = Number.isFinite(v) && v >= 1 && v <= 90 ? v : 7;
   },
+  dateFormat: 'ar-levant', // how dates are shown everywhere — see DateUtil.FORMATS
+  setDateFormat(f) { this.dateFormat = DateUtil.FORMATS[f] ? f : 'ar-levant'; },
   apply(data = {}) {
     if (data.expiringSoonDays != null) this.setExpiringDays(data.expiringSoonDays);
+    if (data.dateFormat != null) this.setDateFormat(data.dateFormat);
   },
 };
 
@@ -68,12 +71,63 @@ const DateUtil = {
     return Math.ceil((a - b) / (1000 * 60 * 60 * 24));
   },
 
-  format(dateStr, locale = 'en') {
-    if (!dateStr) return '—';
-    const d = new Date(dateStr);
-    return d.toLocaleDateString(locale === 'ar' ? 'ar-LB' : 'en-GB', {
-      year: 'numeric', month: 'short', day: 'numeric'
-    });
+  /* Date display formats (chosen in Settings → Date Format, saved as settings/global.dateFormat) */
+  MONTHS: {
+    levant: ['كانون الثاني','شباط','آذار','نيسان','أيار','حزيران','تموز','آب','أيلول','تشرين الأول','تشرين الثاني','كانون الأول'],
+    arabic: ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'],
+    enShort: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
+    enLong: ['January','February','March','April','May','June','July','August','September','October','November','December'],
+  },
+  FORMATS: {
+    'ar-levant': { months: 'levant', rtl: true },   // 1 تشرين الثاني 2026 (default)
+    'ar-std':    { months: 'arabic', rtl: true },   // 1 نوفمبر 2026
+    'en-short':  { months: 'enShort' },             // 1 Nov 2026
+    'en-long':   { months: 'enLong' },              // 1 November 2026
+    'dmy':       { numeric: 'dmy' },                // 01/11/2026
+    'iso':       { numeric: 'iso' },                // 2026-11-01
+  },
+
+  // Accepts 'YYYY-MM-DD', Date, millis or Firestore Timestamp. Plain dates are read as local calendar days.
+  _toDate(v) {
+    if (v == null || v === '') return null;
+    if (v?.toDate) v = v.toDate();
+    if (typeof v === 'string') {
+      const m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+    }
+    const d = v instanceof Date ? v : new Date(v);
+    return isNaN(d) ? null : d;
+  },
+  // Arabic month names are wrapped in an RTL isolate so "1 تشرين الثاني 2026" reads correctly inside LTR text too
+  _iso(txt, rtl) { return rtl ? `\u2067${txt}\u2069` : txt; },
+
+  // `locale` is kept for old callers — the admin's chosen format always wins.
+  format(dateStr, locale) {
+    const d = this._toDate(dateStr);
+    if (!d) return '—';
+    const f = this.FORMATS[AppSettings.dateFormat] || this.FORMATS['ar-levant'];
+    const dd = String(d.getDate()).padStart(2, '0'), mm = String(d.getMonth() + 1).padStart(2, '0'), y = d.getFullYear();
+    if (f.numeric === 'dmy') return `${dd}/${mm}/${y}`;
+    if (f.numeric === 'iso') return `${y}-${mm}-${dd}`;
+    return this._iso(`${d.getDate()} ${this.MONTHS[f.months][d.getMonth()]} ${y}`, f.rtl);
+  },
+
+  // Month + year only (e.g. debt month chips): تشرين الثاني 2026 · Nov 2026 · 11/2026
+  formatMonth(dateStr) {
+    const d = this._toDate(dateStr);
+    if (!d) return '—';
+    const f = this.FORMATS[AppSettings.dateFormat] || this.FORMATS['ar-levant'];
+    const mm = String(d.getMonth() + 1).padStart(2, '0'), y = d.getFullYear();
+    if (f.numeric === 'dmy') return `${mm}/${y}`;
+    if (f.numeric === 'iso') return `${y}-${mm}`;
+    return this._iso(`${this.MONTHS[f.months][d.getMonth()]} ${y}`, f.rtl);
+  },
+
+  // Date + time (24h), e.g. backup export time
+  formatDateTime(v) {
+    const d = this._toDate(v);
+    if (!d) return '—';
+    return `${this.format(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   },
 
   formatShort(dateStr) {
@@ -247,8 +301,8 @@ function generateId() {
 
 /* ── WhatsApp Link Builder ────────────────────────── */
 function buildWhatsAppLink(phone, message) {
-  const clean = phone.replace(/\D/g, '');
-  const num = clean.startsWith('0') ? '961' + clean.slice(1) : clean;
+  const clean = String(phone || '').replace(/\D/g, '');
+  const num = (typeof PhoneInput !== 'undefined' && PhoneInput.waDigits(phone)) || (clean.startsWith('0') ? '961' + clean.slice(1) : clean);
   return `https://wa.me/${num}?text=${encodeURIComponent(message)}`;
 }
 

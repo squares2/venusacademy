@@ -623,7 +623,7 @@ const CourseModule = (() => {
       return `<tr>
         <td><div class="flex items-center gap-2"><div class="avatar">${initials(m.name)}</div><div>
           <div style="font-weight:600">${m.name}${tagHTML}</div>
-          <div style="font-size:11px;color:var(--text-muted)">${m.phone || '—'}</div>
+          <div style="font-size:11px;color:var(--text-muted)">${(typeof PhoneInput!=='undefined'?PhoneInput.display(m.phone,{empty:'—',small:true}):(m.phone||''))}</div>
         </div></div></td>
         <td>${Currency.formatUSD(m.fee || 0)}</td>
         <td style="color:var(--success)">${Currency.formatUSD(m.amountPaid || 0)}</td>
@@ -644,7 +644,7 @@ const CourseModule = (() => {
             onblur="setTimeout(CourseModule.hideMemberDropdown, 150)">
           <div class="combo-dropdown" id="member-search-dropdown"></div>
         </div>
-        <input class="form-input" id="member-phone-input" placeholder="${t('phone_optional')}" style="flex:1;min-width:120px">
+        <input class="form-input" id="member-phone-input" data-phone placeholder="${t('phone_optional')}" style="flex:1;min-width:180px">
         <div class="currency-input-wrap" style="flex:0 0 110px">
           <span class="currency-prefix">$</span>
           <input class="form-input" id="member-fee-input" type="number" min="0" placeholder="${t('fee')}" value="${c.price || ''}">
@@ -668,13 +668,13 @@ const CourseModule = (() => {
     const q = (query || '').trim().toLowerCase();
     const c = _all.find(x => x.id === _activeCourseId);
     const existingIds = new Set((c?.members || []).map(m => m.subscriberId).filter(Boolean));
-    const matches = (!q ? _subscribersList : _subscribersList.filter(s => s.name?.toLowerCase().includes(q) || s.phone?.includes(q)))
+    const matches = (!q ? _subscribersList : _subscribersList.filter(s => s.name?.toLowerCase().includes(q) || (typeof PhoneInput!=='undefined'?PhoneInput.matches(s.phone,q):s.phone?.includes(q))))
       .filter(s => !existingIds.has(s.id)).slice(0, 8);
     dd.innerHTML = matches.length ? matches.map(s => {
       const esc = (s.name || '').replace(/'/g, "\\'");
       const escPhone = (s.phone || '').replace(/'/g, "\\'");
       return `<div class="combo-item" onmousedown="event.preventDefault();CourseModule.selectMember('${s.id}','${esc}','${escPhone}')">
-        <span>${s.name}</span>${s.phone ? `<span class="combo-item-sub">${s.phone}</span>` : ''}
+        <span>${s.name}</span>${s.phone ? `<span class="combo-item-sub">${(typeof PhoneInput!=='undefined'?PhoneInput.display(s.phone,{small:true}):(s.phone||''))}</span>` : ''}
       </div>`;
     }).join('') : `<div class="combo-item combo-empty">${App.t('no_subscriber_match')}</div>`;
     dd.classList.add('open');

@@ -2,7 +2,7 @@
 //  VENUS GYM — Service Worker (PWA)
 // ═══════════════════════════════════════════════════
 
-const CACHE_NAME = 'venus-gym-v24';
+const CACHE_NAME = 'venus-gym-v32';
 
 const STATIC_ASSETS = [
   './',
@@ -10,12 +10,14 @@ const STATIC_ASSETS = [
   './manifest.json',
   './assets/icon-192.webp',
   './assets/icon-512.webp',
+  './assets/flags.webp',
   './styles/main.css',
   './styles/auth.css',
   './styles/modals.css',
   './styles/modules.css',
   './scripts/firebase-config.js',
   './scripts/utils.js',
+  './scripts/phone.js',
   './scripts/netguard.js',
   './scripts/course.js',
   './scripts/backup.js',

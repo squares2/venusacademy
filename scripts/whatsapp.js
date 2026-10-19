@@ -214,6 +214,35 @@ const WaQueue = (() => {
     }).catch(e => { console.warn('WA renewal enqueue failed', e); return null; });
   }
 
+  /* ── Manual "Remind" (Outstanding Balances panel) ──────
+     Queues one unpaid-balance message for this subscriber using the
+     "Unpaid balance" template — even if that automatic type is switched
+     off. A reminder still waiting in the queue is refreshed (amounts may
+     have changed) instead of adding a duplicate.
+     Returns 'added' | 'updated' | 'no_phone'. */
+  async function queueUnpaid(db, { subscriberId, name, phone, items }) {
+    const s = await getSettings(db);
+    const num = normalizePhone(phone || await phoneOf(db, subscriberId));
+    if (!num) return 'no_phone';
+    const rows = (items || []).map(x => ({ ...x, _r: Math.max(0, (Number(x.totalAmount) || 0) - (Number(x.amountPaid) || 0)) }))
+      .filter(x => x._r > 0).sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
+    const total = rows.reduce((t, x) => t + x._r, 0);
+    const list = rows.map(x => `• ${x.sportName || ''} — ${fmtD(x.startDate)}: ${fmt$(x._r)}`).join('\n');
+    const text = render(s.types.unpaid.template, { gym: s.gymName, name: name || '', count: rows.length, total_owed: fmt$(total), list });
+
+    const pend = await db.collection(COL_Q).where('subscriberId', '==', subscriberId || null).where('status', '==', 'pending').get();
+    const old = pend.docs.find(d => d.data().type === 'unpaid');
+    if (old) { await old.ref.update({ text, phone: num, name: name || '' }); return 'updated'; }
+
+    const key = `unpaid_manual_${subscriberId}_${Date.now()}`;
+    await db.collection(COL_Q).doc(safeId(key)).set({
+      type: 'unpaid', key, subscriberId: subscriberId || null, name: name || '', phone: num, text, manual: true,
+      status: 'pending', error: null,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(), createdDate: DateUtil.today(),
+    });
+    return 'added';
+  }
+
   /* ── Daily scan: expiring + unpaid ─────────────────── */
   let _scanning = null;
   function autoScan(db) {
@@ -295,7 +324,7 @@ const WaQueue = (() => {
   }
 
   return { COL_Q, TYPES, PLACEHOLDERS, DEFAULTS, getSettings, invalidate, render, normalizePhone,
-           enqueue, onPayment, onRenewal, scan, autoScan, nextPending, countSentToday, mark, recoverInterrupted };
+           enqueue, onPayment, onRenewal, queueUnpaid, scan, autoScan, nextPending, countSentToday, mark, recoverInterrupted };
 })();
 
 /* ═══════════════════════════════════════════════════ */
@@ -472,7 +501,7 @@ const WaPage = (() => {
     const el = document.getElementById('wa-control'); if (!el) return;
     const st = WaSender.state;
     let line = `<span class="text-muted">${L('idle')}</span>`;
-    if (st.running && st.current) line = `<span class="wa-live"><span class="wa-live-dot"></span>${L('sending_to')} <b>${st.current.name || st.current.phone}</b>…</span>`;
+    if (st.running && st.current) line = `<span class="wa-live"><span class="wa-live-dot"></span>${L('sending_to')} <b>${st.current.name || (typeof PhoneInput!=='undefined' ? PhoneInput.pretty('+' + st.current.phone) : st.current.phone)}</b>…</span>`;
     else if (st.running && st.nextAt) {
       const s = Math.max(0, Math.ceil((st.nextAt - Date.now()) / 1000));
       line = `<span class="wa-live">⏱ ${L('next_in')} <b>${s}${L('sec')}</b></span>`;
@@ -537,7 +566,7 @@ const WaPage = (() => {
             ${x.status === 'sending' ? '' : `<input type="checkbox" class="subs-cb wa-cb" data-id="${x.id}" ${_sel.has(x.id) ? 'checked' : ''} onchange="WaPage.toggleSel('${x.id}',this.checked)">`}
             <span class="wa-type wa-type-${x.type}">${TYPE_ICON[x.type] || '💬'} ${L('type_' + x.type)}</span>
             <b class="wa-name">${esc(x.name) || '—'}</b>
-            <span class="wa-phone">${x.phone ? '+' + x.phone : ''}</span>
+            <span class="wa-phone">${x.phone ? (typeof PhoneInput!=='undefined' ? PhoneInput.display('+' + x.phone, {small:true}) : '+' + x.phone) : ''}</span>
             <span class="wa-when">${when ? DateUtil.timeAgo(when.getTime()) : ''}</span>
             ${x.status === 'sending' ? `<span class="wa-sending">⏳ ${L('st_sending')}</span>` : ''}
             ${err}

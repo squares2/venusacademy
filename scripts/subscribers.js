@@ -124,7 +124,7 @@ const SubscribersModule = (() => {
     const q = (query || '').trim().toLowerCase();
 
     const subMatches = (!q ? _all
-      : _all.filter(s => s.name?.toLowerCase().includes(q) || s.phone?.includes(q))
+      : _all.filter(s => s.name?.toLowerCase().includes(q) || (typeof PhoneInput!=='undefined'?PhoneInput.matches(s.phone,q):s.phone?.includes(q)))
     ).slice(0, 6);
     const sportMatches = (!q ? _sports
       : _sports.filter(sp => sp.name?.toLowerCase().includes(q))
@@ -142,7 +142,7 @@ const SubscribersModule = (() => {
       html += subMatches.map(s => {
         const esc = (s.name || '').replace(/'/g, "\\'");
         return `<div class="combo-item" onmousedown="event.preventDefault();SubscribersModule.selectSearchTerm('${esc}')">
-          <span>${s.name}</span>${s.phone ? `<span class="combo-item-sub">${s.phone}</span>` : ''}
+          <span>${s.name}</span>${s.phone ? `<span class="combo-item-sub">${(typeof PhoneInput!=='undefined'?PhoneInput.display(s.phone,{small:true}):(s.phone||''))}</span>` : ''}
         </div>`;
       }).join('');
     }
@@ -293,9 +293,9 @@ const SubscribersModule = (() => {
           <td class="dt-only" style="color:var(--text-muted)">${num}</td>
           <td class="dt-only"><div class="subscriber-name-cell">
             <div class="avatar">${initials(s.name)}</div>
-            <div><div class="name">${s.name}</div><div class="phone">${s.phone||''}</div></div>
+            <div><div class="name">${s.name}</div><div class="phone">${(typeof PhoneInput!=='undefined'?PhoneInput.display(s.phone,{small:true}):(s.phone||''))}</div></div>
           </div></td>
-          <td class="dt-only">${s.phone||'—'}</td>
+          <td class="dt-only">${(typeof PhoneInput!=='undefined'?PhoneInput.display(s.phone,{empty:'—'}):(s.phone||''))}</td>
           <td class="dt-only">${sub?.sportName||'—'}</td>
           <td class="dt-only">${sub?.coachName||'—'}</td>
           <td class="dt-only">${statusBadge}</td>
@@ -314,7 +314,7 @@ const SubscribersModule = (() => {
                 <div class="flex items-center gap-2">
                   <div class="avatar">${initials(s.name)}</div>
                   <div><div style="font-weight:700;font-size:14px">${s.name}</div>
-                  <div style="font-size:11px;color:var(--text-muted)">${s.phone||''}</div></div>
+                  <div style="font-size:11px;color:var(--text-muted)">${(typeof PhoneInput!=='undefined'?PhoneInput.display(s.phone,{small:true}):(s.phone||''))}</div></div>
                 </div>
                 ${statusBadge}
               </div>
@@ -362,7 +362,7 @@ const SubscribersModule = (() => {
 
     _filtered = _rows.filter(r => {
       const s = r.subscriber;
-      const matchQ = !q || s.name?.toLowerCase().includes(q) || s.phone?.includes(q)
+      const matchQ = !q || s.name?.toLowerCase().includes(q) || (typeof PhoneInput!=='undefined'?PhoneInput.matches(s.phone,q):s.phone?.includes(q))
                         || r.sub?.sportName?.toLowerCase().includes(q);
       const matchStatus = !status || r.status === status;
       const matchSport  = !sport  || r.sub?.sportId === sport;
@@ -393,7 +393,7 @@ const SubscribersModule = (() => {
             </div>
             <div class="form-group">
               <label class="form-label">${t('phone')} <span class="required">*</span></label>
-              <input class="form-input" id="sf-phone" placeholder="+961 xx xxx xxx">
+              <input class="form-input" id="sf-phone" data-phone>
               <div class="form-error-msg"></div>
             </div>
           </div>
@@ -575,7 +575,7 @@ const SubscribersModule = (() => {
           <div class="avatar avatar-xl">${initials(sub.name)}</div>
           <div class="profile-meta">
             <div class="profile-name">${sub.name}</div>
-            <div class="profile-id">${sub.phone || ''} · ${sub.address || ''}</div>
+            <div class="profile-id">${(typeof PhoneInput!=='undefined'?PhoneInput.display(sub.phone):(sub.phone||''))} · ${sub.address || ''}</div>
             <div class="profile-badges" style="margin-top:8px">
               ${sub.gender ? `<span class="badge badge-info">${sub.gender === 'female' ? '♀' : '♂'} ${App.t(sub.gender)}</span>` : ''}
               ${sub._status ? `<span class="badge badge-${sub._status === 'active' ? 'active' : sub._status === 'expiring' ? 'warning' : 'expired'}">${App.t(sub._status)}</span>` : ''}
@@ -713,7 +713,7 @@ const SubscribersModule = (() => {
       App.t('start_date'), App.t('expires'), App.t('total'), App.t('paid'), App.t('remaining')]];
     _filtered.forEach(r => {
       const s = r.subscriber, sub = r.sub;
-      rows.push([s.name, s.phone, s.gender, s.address, sub?.sportName || '', r.status,
+      rows.push([s.name, (typeof PhoneInput!=='undefined'?PhoneInput.pretty(s.phone):s.phone), s.gender, s.address, sub?.sportName || '', r.status,
         sub?.startDate || '', sub?.endDate || '',
         sub ? String(sub.totalAmount || 0) : '', sub ? String(sub.amountPaid || 0) : '',
         sub ? String(r.remaining) : '']);

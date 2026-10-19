@@ -365,7 +365,7 @@ const BackupModule = (() => {
     const knownNames = collectionsList().map(c => c.name);
 
     metaEl.innerHTML = `
-      <div class="detail-row"><span class="detail-label">${App.t('backup_exported_at')}</span><span class="detail-value">${meta.exportedAt ? new Date(meta.exportedAt).toLocaleString() : '—'}</span></div>
+      <div class="detail-row"><span class="detail-label">${App.t('backup_exported_at')}</span><span class="detail-value">${meta.exportedAt ? DateUtil.formatDateTime(meta.exportedAt) : '—'}</span></div>
       <div class="detail-row"><span class="detail-label">${App.t('backup_exported_by')}</span><span class="detail-value">${meta.exportedBy || '—'}</span></div>
       <div class="detail-row"><span class="detail-label">${App.t('backup_total_docs')}</span><span class="detail-value">${meta.totalDocs ?? Object.values(_importPayload.data).reduce((n, arr) => n + arr.length, 0)}</span></div>
     `;

@@ -15,10 +15,15 @@ const POSModule = (() => {
           <p class="page-subtitle">${t('pos_subtitle')}</p>
         </div>
         <div class="page-header-right">
+          <div class="pos-tabs" role="tablist">
+            <button type="button" class="pos-tab" data-postab="sell" onclick="POSModule.switchTab('sell')">🛒 ${t('pos_tab_sell')}</button>
+            <button type="button" class="pos-tab" data-postab="history" onclick="POSModule.switchTab('history')">🧾 ${t('pos_tab_history')}</button>
+          </div>
           <button class="btn btn-outline" onclick="POSModule.openInventory()">📦 ${t('inventory')}</button>
         </div>
       </div>
-      <div class="pos-layout">
+      <div id="pos-history" style="display:none"></div>
+      <div class="pos-layout" id="pos-sell">
         <div>
           <div class="search-bar">
             <div class="search-input-wrap">
@@ -75,7 +80,9 @@ const POSModule = (() => {
       ${inventoryModal()}`;
     FilterMemory.register('pos', { persist: ['pos-category'], session: ['pos-search'], onReset: () => applyProductFilter() });
     FilterMemory.restore('pos');
+    _histBuilt = false; _histCache = { key: '', sales: [] };
     await loadProducts();
+    switchTab(_savedTab());
   }
 
   async function loadProducts() {
@@ -93,13 +100,92 @@ const POSModule = (() => {
 
   function renderProducts(list) {
     const grid = document.getElementById('pos-products');
-    grid.innerHTML = list.map(p => `
-      <div class="pos-product-card${(p.stock||0)<=0?' out-of-stock':''}" onclick="POSModule.addToCart('${p.id}')">
-        <div class="pos-product-emoji">${catIcon(p.category)}</div>
-        <div class="pos-product-name">${p.name}</div>
-        <div class="pos-product-price">${Currency.formatUSD(p.priceUsd)}</div>
-        <div class="pos-product-stock">${App.t('stock')}: ${p.stock??'∞'}</div>
-      </div>`).join('');
+    grid.innerHTML = list.map(p => {
+      const out = (p.stock||0) <= 0, low = !out && _hasStock(p) && Number(p.stock) <= 3;
+      return `
+      <div class="pos-product-card${p.image?' has-img':''}${out?' out-of-stock':''}${low?' low-stock':''}" data-pid="${_esc(p.id)}" data-cat="${_esc(p.category||'other')}" onclick="POSModule.addToCart('${p.id}')">
+        <div class="pos-card-media">
+          ${p.image ? `<img src="${p.image}" alt="${_esc(p.name)}" loading="lazy" draggable="false">` : `<span class="pos-card-emoji">${catIcon(p.category)}</span>`}
+          <span class="pos-card-price">${Currency.formatUSD(p.priceUsd)}</span>
+          ${p.image ? `<button type="button" class="pos-card-zoom" title="${App.t('pos_zoom')}" aria-label="${App.t('pos_zoom')}" onclick="event.stopPropagation();POSModule.viewImage('${p.id}')"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>` : ''}
+          <span class="pos-card-qty" hidden></span>
+          ${out ? `<span class="pos-card-out">${App.t('pos_out_badge')}</span>` : ''}
+        </div>
+        <div class="pos-card-body">
+          <div class="pos-card-name" title="${_esc(p.name)}">${_esc(p.name)}</div>
+          <div class="pos-card-meta">
+            <span>${catIcon(p.category)} ${catLabel(p.category)}</span>
+            <span class="pos-card-stock">${_hasStock(p) ? `${App.t('stock')}: ${p.stock}` : '∞'}</span>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+    _syncCardQty();
+  }
+
+  // little "in cart" bubble on each product card
+  function _syncCardQty() {
+    document.querySelectorAll('.pos-product-card[data-pid]').forEach(card => {
+      const it = _cart.find(c => c.id === card.dataset.pid), b = card.querySelector('.pos-card-qty');
+      if (!b) return;
+      b.hidden = !it; if (it) b.textContent = `×${it.qty}`;
+      card.classList.toggle('in-cart', !!it);
+    });
+  }
+  /* ── Full-screen picture viewer (fits any screen; tap the picture to zoom 2×) ── */
+  let _viewId = null;
+  function viewImage(id) {
+    const p = _products.find(x => x.id === id); if (!p || !p.image) return;
+    _viewId = id;
+    let ov = document.getElementById('pos-viewer');
+    if (!ov) {
+      ov = document.createElement('div'); ov.id = 'pos-viewer'; ov.className = 'pos-viewer';
+      ov.addEventListener('click', e => { if (e.target === ov || e.target.classList.contains('pv-stage')) closeImage(); });
+      document.body.appendChild(ov);
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.getElementById('pos-viewer')?.classList.contains('open')) closeImage(); });
+    }
+    const out = (p.stock||0) <= 0;
+    ov.innerHTML = `
+      <button type="button" class="pv-close" aria-label="${App.t('close')}" onclick="POSModule.closeImage()">✕</button>
+      <div class="pv-stage"><img class="pv-img" src="${p.image}" alt="${_esc(p.name)}" onclick="POSModule.toggleZoom(event)"></div>
+      <div class="pv-info">
+        <div class="pv-text">
+          <div class="pv-name">${_esc(p.name)}</div>
+          <div class="pv-meta"><span>${catIcon(p.category)} ${catLabel(p.category)}</span><span class="pv-stock${out?' out':''}">${_hasStock(p) ? `${App.t('stock')}: ${p.stock}` : '∞'}</span></div>
+        </div>
+        <div class="pv-price">${Currency.formatUSD(p.priceUsd)}</div>
+        ${out ? `<span class="pv-out">${App.t('pos_out_badge')}</span>` : `<button type="button" class="btn btn-primary pv-add" onclick="POSModule.addFromViewer()">🛒 ${App.t('pos_add_to_cart')}</button>`}
+      </div>`;
+    const img = ov.querySelector('.pv-img');
+    if (img.complete) _fitViewer(); else img.onload = _fitViewer;
+    requestAnimationFrame(() => { _fitViewer(); ov.classList.add('open'); });
+    document.body.style.overflow = 'hidden';
+  }
+  // scale the picture to the largest size that fits the free space (keeps its shape, any screen width)
+  function _fitViewer() {
+    const ov = document.getElementById('pos-viewer'); if (!ov || !ov.isConnected) return;
+    const stage = ov.querySelector('.pv-stage'), img = ov.querySelector('.pv-img');
+    if (!stage || !img || !img.naturalWidth) return;
+    const w = stage.clientWidth, h = stage.clientHeight; if (!w || !h) return;
+    const k = Math.min(w / img.naturalWidth, h / img.naturalHeight, 3);
+    img.style.width = Math.round(img.naturalWidth * k) + 'px';
+    img.style.height = Math.round(img.naturalHeight * k) + 'px';
+  }
+  window.addEventListener('resize', () => { if (document.getElementById('pos-viewer')?.classList.contains('open')) _fitViewer(); });
+  function closeImage() {
+    const ov = document.getElementById('pos-viewer'); if (!ov) return;
+    ov.classList.remove('open'); document.body.style.overflow = ''; _viewId = null;
+  }
+  function toggleZoom(e) {
+    const img = e.currentTarget, r = img.getBoundingClientRect();
+    img.style.transformOrigin = `${((e.clientX - r.left) / r.width) * 100}% ${((e.clientY - r.top) / r.height) * 100}%`;
+    img.classList.toggle('zoomed');
+  }
+  function addFromViewer() { const id = _viewId; closeImage(); if (id) addToCart(id); }
+
+  function _bump(id) {
+    const card = document.querySelector(`.pos-product-card[data-pid="${CSS.escape(id)}"]`); if (!card) return;
+    card.classList.remove('bump'); void card.offsetWidth; card.classList.add('bump');
   }
 
   function catIcon(c){return{water:'💧',food:'🍎',supplement:'💊',gear:'🥊',apparel:'👕'}[c]||'📦';}
@@ -109,15 +195,26 @@ const POSModule = (() => {
 
   function onCat(){ applyProductFilter(); }
 
+  /* ── Stock limit: a product with a stock number can't go above it in the cart (no stock = unlimited) ── */
+  const _hasStock = p => p && p.stock !== undefined && p.stock !== null && p.stock !== '';
+  const _maxQty = id => { const p=_products.find(x=>x.id===id); return _hasStock(p) ? Math.max(0, Number(p.stock)||0) : Infinity; };
+  function _stockWarn(name, max){
+    Toast.warning(max>0 ? App.t('pos_stock_limit').replace('{name}',name).replace('{n}',max) : App.t('pos_out_of_stock').replace('{name}',name));
+  }
+
   function addToCart(id) {
     const p=_products.find(x=>x.id===id); if(!p)return;
     const existing=_cart.find(c=>c.id===id);
-    if(existing){existing.qty++;} else {_cart.push({...p,qty:1});}
-    renderCart();
+    const max=_maxQty(id), next=(existing?existing.qty:0)+1;
+    if(next>max){_stockWarn(p.name,max);return;}
+    if(existing){existing.qty=next;} else {_cart.push({...p,qty:1});}
+    renderCart(); _bump(id);
   }
 
   function updateQty(id,delta){
     const item=_cart.find(c=>c.id===id); if(!item)return;
+    const max=_maxQty(id);
+    if(delta>0&&item.qty+delta>max){_stockWarn(item.name,max);return;}
     item.qty+=delta;
     if(item.qty<=0)_cart=_cart.filter(c=>c.id!==id);
     renderCart();
@@ -132,11 +229,12 @@ const POSModule = (() => {
     } else {
       el.innerHTML=_cart.map(c=>`
         <div class="cart-item">
-          <span class="cart-item-name">${c.name}</span>
+          <span class="cart-item-thumb" data-cat="${_esc(c.category||'other')}">${c.image?`<img src="${c.image}" alt="">`:catIcon(c.category)}</span>
+          <span class="cart-item-name">${_esc(c.name)}</span>
           <div class="cart-qty-control">
             <button class="cart-qty-btn" onclick="POSModule.updateQty('${c.id}',-1)">−</button>
             <span class="cart-qty-num">${c.qty}</span>
-            <button class="cart-qty-btn" onclick="POSModule.updateQty('${c.id}',1)">+</button>
+            <button class="cart-qty-btn"${c.qty>=_maxQty(c.id)?' style="opacity:.35;cursor:not-allowed"':''} title="${_hasStock(c)?`${App.t('stock')}: ${_maxQty(c.id)}`:''}" onclick="POSModule.updateQty('${c.id}',1)">+</button>
           </div>
           <span class="cart-item-total">${Currency.formatUSD((c.priceUsd||0)*c.qty)}</span>
         </div>`).join('');
@@ -145,6 +243,7 @@ const POSModule = (() => {
     setText('cart-subtotal-usd',Currency.formatUSD(total));
     setText('cart-subtotal-lbp',Currency.formatLBP(Currency.usdToLbp(total)));
     setText('cart-total',Currency.formatUSD(total));
+    _syncCardQty();
     calcChange();
   }
 
@@ -163,24 +262,279 @@ const POSModule = (() => {
     const customer=document.getElementById('pos-customer')?.value||'';
     const method=document.getElementById('pos-pay-method')?.value||'cash';
     try{
-      await _db.collection(COL.SALES).add({
+      // Re-check stock just before selling (another device may have sold some). On a weak
+      // connection we don't wait more than a few seconds — the last loaded stock is used instead.
+      await Promise.race([
+        Promise.all(_cart.map(c=>_db.collection(COL.PRODUCTS).doc(c.id).get().then(d=>{
+          const p=_products.find(x=>x.id===c.id); if(p&&d.exists)p.stock=d.data().stock;
+        }))),
+        new Promise(r=>setTimeout(r,4000)),
+      ]).catch(()=>{});
+      const over=_cart.find(c=>c.qty>_maxQty(c.id));
+      if(over){ _stockWarn(over.name,_maxQty(over.id)); applyProductFilter(); renderCart(); return; }
+
+      // Sale + stock decrease in one batch, so a sale is never saved without its stock update
+      const batch=_db.batch();
+      batch.set(_db.collection(COL.SALES).doc(),{
         items:_cart.map(c=>({id:c.id,name:c.name,qty:c.qty,priceUsd:c.priceUsd})),
         totalUsd:total, amountPaid:paid, paymentMethod:method,
         customer, createdAt:firebase.firestore.FieldValue.serverTimestamp(),
       });
-      // Update stock
-      const batch=_db.batch();
       _cart.forEach(c=>{
-        if(c.stock!==undefined&&c.stock!==null){
+        if(_hasStock(_products.find(x=>x.id===c.id))){
           batch.update(_db.collection(COL.PRODUCTS).doc(c.id),{stock:firebase.firestore.FieldValue.increment(-c.qty)});
         }
       });
       await batch.commit();
       Toast.success(App.t('sale_completed'));
+      _histCache = { key: '', sales: [] }; // history shows the new sale next time
       clearCart();
       document.getElementById('pos-customer').value='';
       await loadProducts();
     }catch(e){Toast.error(App.t('error_generic'));}
+  }
+
+  /* ══ Sales History ═══════════════════════════════════
+     Every past POS sale, grouped by day, with saved filters
+     (date preset / custom range / product / payment / search).
+     Filters live in localStorage so they survive closing the app. ── */
+  let _histBuilt = false, _histCache = { key: '', sales: [] }, _histShown = 60, _histView = [];
+  const _TAB_KEY = 'venus_pos_tab';
+  const _savedTab = () => { try { return localStorage.getItem(_TAB_KEY) === 'history' ? 'history' : 'sell'; } catch (_) { return 'sell'; } };
+  const _esc = v => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const _ymdL = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const _hhmm = d => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  const _saleDate = x => x.createdAt?.toDate?.() || null;
+  const _paidOf = x => Math.min(Number(x.totalUsd)||0, Number(x.amountPaid ?? x.totalUsd)||0);
+
+  function switchTab(tab) {
+    tab = tab === 'history' ? 'history' : 'sell';
+    try { localStorage.setItem(_TAB_KEY, tab); } catch (_) {}
+    document.querySelectorAll('.pos-tab').forEach(b => b.classList.toggle('active', b.dataset.postab === tab));
+    const sell = document.getElementById('pos-sell'), hist = document.getElementById('pos-history');
+    if (sell) sell.style.display = tab === 'sell' ? '' : 'none';
+    if (hist) hist.style.display = tab === 'history' ? '' : 'none';
+    if (tab === 'history') { if (!_histBuilt) _buildHistory(); loadHistory(); }
+  }
+
+  function _buildHistory() {
+    const t = App.t.bind(App);
+    const el = document.getElementById('pos-history'); if (!el) return;
+    const prods = [..._products].sort((a,b) => (a.name||'').localeCompare(b.name||''));
+    el.innerHTML = `
+      <div class="sh-filters">
+        <div class="search-input-wrap sh-search">
+          <span class="search-icon">🔍</span>
+          <input class="search-input" id="sh-search" placeholder="${t('sh_search')}" oninput="POSModule.onHistSearch()">
+        </div>
+        <select class="filter-select" id="sh-period" onchange="POSModule.onHistPeriod()">
+          ${['today','yesterday','7d','month','last_month','30d','year','all','custom'].map(k => `<option value="${k}"${k==='today'?' selected':''}>${t('sh_'+k)}</option>`).join('')}
+        </select>
+        <div class="subs-date-range" id="sh-range" style="display:none">
+          <input class="filter-select" type="date" id="sh-from" title="${t('from_date')}" onchange="POSModule.loadHistory()">
+          <span class="subs-date-sep">→</span>
+          <input class="filter-select" type="date" id="sh-to" title="${t('to_date')}" onchange="POSModule.loadHistory()">
+        </div>
+        <select class="filter-select" id="sh-product" onchange="POSModule.renderHistory()">
+          <option value="">${t('sh_all_products')}</option>
+          ${prods.map(p => `<option value="${_esc(p.id)}">${catIcon(p.category)} ${_esc(p.name)}</option>`).join('')}
+        </select>
+        <select class="filter-select" id="sh-method" onchange="POSModule.renderHistory()">
+          <option value="">${t('sh_all_methods')}</option>
+          <option value="cash">💵 ${t('cash')}</option>
+          <option value="partial">⊘ ${t('partial')}</option>
+          <option value="unpaid">⚠ ${t('sh_unpaid')}</option>
+        </select>
+        ${FilterMemory.resetButton('pos-history')}
+        <button type="button" class="btn btn-outline sh-export" onclick="POSModule.exportHistory()">⬇ ${t('sh_export')}</button>
+      </div>
+      <div class="sh-period-label" id="sh-period-label"></div>
+      <div class="kpi-grid sh-kpis" id="sh-kpis"></div>
+      <div class="sh-body">
+        <div class="sh-list" id="sh-list"></div>
+        <aside class="chart-card sh-top" id="sh-top"></aside>
+      </div>`;
+    FilterMemory.register('pos-history', {
+      persist: ['sh-period','sh-from','sh-to','sh-product','sh-method','sh-search'],
+      onReset: () => { _syncHistRange(); loadHistory(); },
+    });
+    FilterMemory.restore('pos-history');
+    _syncHistRange();
+    _histBuilt = true;
+  }
+
+  function _syncHistRange() {
+    const custom = document.getElementById('sh-period')?.value === 'custom';
+    const w = document.getElementById('sh-range'); if (w) w.style.display = custom ? 'flex' : 'none';
+  }
+
+  function onHistPeriod() {
+    const custom = document.getElementById('sh-period')?.value === 'custom';
+    const f = document.getElementById('sh-from'), to = document.getElementById('sh-to');
+    if (custom) { const n = new Date(); if (f && !f.value) f.value = _ymdL(new Date(n.getFullYear(), n.getMonth(), 1)); if (to && !to.value) to.value = _ymdL(n); }
+    else { if (f) f.value = ''; if (to) to.value = ''; }
+    _syncHistRange();
+    loadHistory();
+  }
+  const onHistSearch = debounce(() => renderHistory(), 250);
+
+  // [from, to] as local Dates (null = open-ended) + a readable label
+  function _histRange() {
+    const p = document.getElementById('sh-period')?.value || 'today';
+    const n = new Date(), y = n.getFullYear(), m = n.getMonth(), d = n.getDate();
+    const day0 = (yy, mm, dd) => new Date(yy, mm, dd, 0, 0, 0, 0), day1 = (yy, mm, dd) => new Date(yy, mm, dd, 23, 59, 59, 999);
+    let from = null, to = null;
+    if (p === 'today') { from = day0(y,m,d); to = day1(y,m,d); }
+    else if (p === 'yesterday') { from = day0(y,m,d-1); to = day1(y,m,d-1); }
+    else if (p === '7d') { from = day0(y,m,d-6); to = day1(y,m,d); }
+    else if (p === '30d') { from = day0(y,m,d-29); to = day1(y,m,d); }
+    else if (p === 'month') { from = day0(y,m,1); to = day1(y,m,d); }
+    else if (p === 'last_month') { from = day0(y,m-1,1); to = day1(y,m,0); }
+    else if (p === 'year') { from = day0(y,0,1); to = day1(y,m,d); }
+    else if (p === 'custom') {
+      let f = document.getElementById('sh-from')?.value || '', tt = document.getElementById('sh-to')?.value || '';
+      if (f && tt && f > tt) [f, tt] = [tt, f];
+      if (f) { const [a,b,c] = f.split('-').map(Number); from = day0(a,b-1,c); }
+      if (tt) { const [a,b,c] = tt.split('-').map(Number); to = day1(a,b-1,c); }
+    }
+    const label = p === 'all' ? App.t('sh_all')
+      : (from && to && _ymdL(from) === _ymdL(to)) ? DateUtil.format(from)
+      : `${from ? DateUtil.format(from) : '…'} → ${to ? DateUtil.format(to) : '…'}`;
+    return { from, to, label };
+  }
+
+  async function loadHistory() {
+    if (!_histBuilt) return;
+    FilterMemory.save('pos-history');
+    const { from, to, label } = _histRange();
+    const lbl = document.getElementById('sh-period-label'); if (lbl) lbl.textContent = `📅 ${label}`;
+    const key = `${from?.getTime()||''}|${to?.getTime()||''}`;
+    if (_histCache.key !== key) {
+      document.getElementById('sh-list').innerHTML = '<div class="page-loader"><div class="spinner"></div></div>';
+      try {
+        let q = _db.collection(COL.SALES);
+        const TS = firebase.firestore.Timestamp;
+        if (from) q = q.where('createdAt', '>=', TS.fromDate(from));
+        if (to) q = q.where('createdAt', '<=', TS.fromDate(to));
+        const snap = await q.orderBy('createdAt', 'desc').get();
+        _histCache = { key, sales: snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(_saleDate) };
+      } catch (e) {
+        console.error(e);
+        document.getElementById('sh-list').innerHTML = `<p class="sh-empty" style="color:var(--danger)">${App.t('sh_failed')}</p>`;
+        return;
+      }
+    }
+    _histShown = 60;
+    renderHistory();
+  }
+
+  function _filteredSales() {
+    const prod = document.getElementById('sh-product')?.value || '';
+    const meth = document.getElementById('sh-method')?.value || '';
+    const q = (document.getElementById('sh-search')?.value || '').trim().toLowerCase();
+    return _histCache.sales.filter(x => {
+      const items = x.items || [];
+      if (prod && !items.some(i => i.id === prod)) return false;
+      if (meth === 'unpaid') { if (!(_paidOf(x) < (Number(x.totalUsd)||0) - 0.004)) return false; }
+      else if (meth && (x.paymentMethod || 'cash') !== meth) return false;
+      if (q && !((x.customer||'').toLowerCase().includes(q) || items.some(i => (i.name||'').toLowerCase().includes(q)))) return false;
+      return true;
+    });
+  }
+
+  function renderHistory() {
+    if (!_histBuilt) return;
+    FilterMemory.save('pos-history');
+    const t = App.t.bind(App);
+    const prod = document.getElementById('sh-product')?.value || '';
+    const list = _histView = _filteredSales();
+
+    // when one product is picked, totals count that product only
+    const lineOf = i => (Number(i.priceUsd)||0) * (Number(i.qty)||0);
+    const saleTotal = x => prod ? (x.items||[]).filter(i => i.id === prod).reduce((a,i) => a + lineOf(i), 0) : (Number(x.totalUsd)||0);
+    const saleQty = x => (x.items||[]).filter(i => !prod || i.id === prod).reduce((a,i) => a + (Number(i.qty)||0), 0);
+    const revenue = list.reduce((a,x) => a + saleTotal(x), 0);
+    const unpaid = list.reduce((a,x) => a + Math.max(0, (Number(x.totalUsd)||0) - _paidOf(x)), 0);
+    const qty = list.reduce((a,x) => a + saleQty(x), 0);
+
+    document.getElementById('sh-kpis').innerHTML = [
+      { icon:'💵', v:Currency.formatUSD(revenue), l:t('sh_revenue'), c:'var(--gold-400)' },
+      { icon:'🧾', v:list.length, l:t('sh_transactions') },
+      { icon:'📦', v:qty, l:t('sh_items') },
+      { icon:'📊', v:Currency.formatUSD(list.length ? revenue/list.length : 0), l:t('sh_avg') },
+      { icon:'⚠️', v:Currency.formatUSD(unpaid), l:t('sh_unpaid'), c: unpaid > 0 ? 'var(--danger)' : '' },
+    ].map(k => `<div class="kpi-card"><div class="kpi-icon">${k.icon}</div><div class="kpi-value"${k.c?` style="color:${k.c}"`:''}>${k.v}</div><div class="kpi-label">${k.l}</div></div>`).join('');
+
+    // best sellers
+    const top = new Map();
+    list.forEach(x => (x.items||[]).forEach(i => {
+      if (prod && i.id !== prod) return;
+      const k = i.id || i.name; if (!top.has(k)) top.set(k, { name: i.name || '—', qty: 0, rev: 0 });
+      const o = top.get(k); o.qty += Number(i.qty)||0; o.rev += lineOf(i);
+    }));
+    const topList = [...top.values()].sort((a,b) => b.rev - a.rev).slice(0, 8);
+    const maxRev = topList[0]?.rev || 1;
+    document.getElementById('sh-top').innerHTML = `
+      <div class="chart-card-header"><div><div class="chart-title">🏆 ${t('sh_top')}</div></div></div>
+      ${topList.length ? topList.map(p => `
+        <div class="sh-top-row">
+          <div class="sh-top-head"><span>${_esc(p.name)}</span><b>${Currency.formatUSD(p.rev)}</b></div>
+          <div class="rev-bar-track"><div class="rev-bar-fill" style="width:${Math.max(4, Math.round(p.rev/maxRev*100))}%"></div></div>
+          <small>${p.qty} ${t('sh_pcs')}</small>
+        </div>`).join('') : `<p class="text-muted text-sm">${t('no_data')}</p>`}`;
+
+    // list grouped by day
+    const box = document.getElementById('sh-list');
+    if (!list.length) { box.innerHTML = `<div class="sh-empty">🧾<br>${t('sh_no_sales')}</div>`; return; }
+    const shown = list.slice(0, _histShown);
+    const today = DateUtil.today(), yest = DateUtil.addDays(today, -1);
+    const dayTotals = new Map();
+    list.forEach(x => { const k = _ymdL(_saleDate(x)); const o = dayTotals.get(k) || { n: 0, sum: 0 }; o.n++; o.sum += saleTotal(x); dayTotals.set(k, o); });
+    let html = '', curDay = '';
+    shown.forEach(x => {
+      const d = _saleDate(x), k = _ymdL(d);
+      if (k !== curDay) {
+        if (curDay) html += '</div>';
+        curDay = k;
+        const dt = dayTotals.get(k);
+        let wd = ''; try { wd = d.toLocaleDateString(App.lang === 'ar' ? 'ar-LB' : 'en-GB', { weekday: 'long' }); } catch (_) {}
+        const rel = k === today ? t('sh_today') : k === yest ? t('sh_yesterday') : wd;
+        html += `<div class="sh-day"><div class="sh-day-head"><div><b>${rel}</b><span>${DateUtil.format(k)}</span></div>
+                 <div class="sh-day-sum"><span>${(dt.n === 1 ? t('sh_sale_one') : t('sh_sales_count').replace('{n}', dt.n))}</span><b>${Currency.formatUSD(dt.sum)}</b></div></div>`;
+      }
+      const total = Number(x.totalUsd)||0, owes = Math.max(0, total - _paidOf(x));
+      const items = (x.items||[]).map(i => `<span class="sh-chip${prod && i.id === prod ? ' hit' : ''}"><b>${Number(i.qty)||0}×</b> ${_esc(i.name)} <em>${Currency.formatUSD(lineOf(i))}</em></span>`).join('');
+      const meth = (x.paymentMethod || 'cash') === 'partial' ? `<span class="sh-pay partial">⊘ ${t('partial')}</span>` : `<span class="sh-pay cash">💵 ${t('cash')}</span>`;
+      html += `<div class="sh-sale">
+          <div class="sh-time">${_hhmm(d)}</div>
+          <div class="sh-items">${items || '—'}</div>
+          <div class="sh-cust">${x.customer ? `👤 ${_esc(x.customer)}` : `<span class="text-muted">${t('sh_walk_in')}</span>`}</div>
+          <div class="sh-meth">${meth}</div>
+          <div class="sh-amt"><b>${Currency.formatUSD(total)}</b>${owes > 0.004 ? `<small>${t('sh_owes')} ${Currency.formatUSD(owes)}</small>` : ''}</div>
+        </div>`;
+    });
+    html += '</div>';
+    if (list.length > _histShown) html += `<button type="button" class="btn btn-outline w-full sh-more" onclick="POSModule.moreHistory()">${t('sh_show_more')} (${list.length - _histShown})</button>`;
+    box.innerHTML = html;
+  }
+
+  function moreHistory() { _histShown += 60; renderHistory(); }
+
+  function exportHistory() {
+    const rows = _histView;
+    if (!rows.length) { Toast.warning(App.t('sh_no_sales')); return; }
+    const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const head = ['Date','Time','Customer','Items','Payment','Total USD','Paid USD','Unpaid USD'];
+    const lines = rows.map(x => {
+      const d = _saleDate(x), total = Number(x.totalUsd)||0, paid = _paidOf(x);
+      return [_ymdL(d), _hhmm(d), x.customer || '', (x.items||[]).map(i => `${i.qty}x ${i.name}`).join(' | '),
+              x.paymentMethod || 'cash', total.toFixed(2), paid.toFixed(2), Math.max(0, total - paid).toFixed(2)].map(q).join(',');
+    });
+    const blob = new Blob(['﻿' + [head.map(q).join(','), ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `venus-sales-${DateUtil.today()}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
 
   function inventoryModal(){
@@ -202,6 +556,25 @@ const POSModule = (() => {
                 <button class="modal-close" onclick="Modal.close('modal-product')">✕</button>
               </div>
               <div class="modal-body">
+                <div class="form-group">
+                  <label class="form-label">${App.t('pf_image')}</label>
+                  <div class="pf-img" id="pf-img-drop" tabindex="0" onclick="POSModule.pickImage()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();POSModule.pickImage()}"
+                       ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')"
+                       ondrop="event.preventDefault();this.classList.remove('drag');POSModule.onImageFile(event.dataTransfer.files[0])">
+                    <img id="pf-img-prev" alt="" hidden>
+                    <div class="pf-img-empty" id="pf-img-empty">
+                      <div class="pf-img-icon">🖼️</div>
+                      <div class="pf-img-title">${App.t('pf_image_pick')}</div>
+                      <div class="pf-img-hint">${App.t('pf_image_hint')}</div>
+                    </div>
+                    <div class="pf-img-busy" id="pf-img-busy" hidden><div class="spinner"></div></div>
+                    <div class="pf-img-actions" id="pf-img-actions" hidden>
+                      <button type="button" class="btn btn-sm pf-img-btn" onclick="event.stopPropagation();POSModule.pickImage()">🔄 ${App.t('pf_image_change')}</button>
+                      <button type="button" class="btn btn-sm pf-img-btn danger" onclick="event.stopPropagation();POSModule.removeImage()">🗑 ${App.t('pf_image_remove')}</button>
+                    </div>
+                  </div>
+                  <input type="file" id="pf-img-file" accept="image/*" hidden onchange="POSModule.onImageFile(this.files[0]);this.value=''">
+                </div>
                 <div class="form-group"><label class="form-label">${App.t('name_generic')} <span class="required">*</span></label><input class="form-input" id="pf-name"><div class="form-error-msg"></div></div>
                 <div class="form-row">
                   <div class="form-group"><label class="form-label">${App.t('price_usd')} <span class="required">*</span></label><input class="form-input" id="pf-price" type="number" min="0"><div class="form-error-msg"></div></div>
@@ -235,21 +608,80 @@ const POSModule = (() => {
   function renderInventoryList(){
     const el=document.getElementById('inv-list');
     if(!el)return;
-    el.innerHTML=`<table style="width:100%"><thead><tr><th>${App.t('name_generic')}</th><th>${App.t('category')}</th><th>${App.t('price_generic')}</th><th>${App.t('stock')}</th><th>${App.t('actions')}</th></tr></thead><tbody>${
-      _products.map(p=>`<tr><td>${p.name}</td><td>${catIcon(p.category)} ${catLabel(p.category)}</td><td>${Currency.formatUSD(p.priceUsd)}</td><td>${p.stock??'∞'}</td><td><button class="btn btn-danger btn-sm" onclick="POSModule.delProduct('${p.id}','${p.name.replace(/'/g,"\\'")}')">🗑</button></td></tr>`).join('')
-    }</tbody></table>`;
+    el.innerHTML=`<div class="table-scroll"><table class="inv-table" style="width:100%"><thead><tr><th></th><th>${App.t('name_generic')}</th><th>${App.t('category')}</th><th>${App.t('price_generic')}</th><th>${App.t('stock')}</th><th>${App.t('actions')}</th></tr></thead><tbody>${
+      _products.map(p=>`<tr>
+        <td><span class="inv-thumb" data-cat="${_esc(p.category||'other')}" onclick="POSModule.openEditProduct('${p.id}')">${p.image?`<img src="${p.image}" alt="">`:catIcon(p.category)}</span></td>
+        <td><b>${_esc(p.name)}</b></td><td>${catIcon(p.category)} ${catLabel(p.category)}</td><td>${Currency.formatUSD(p.priceUsd)}</td><td>${p.stock??'∞'}</td>
+        <td style="white-space:nowrap"><button class="btn btn-outline btn-sm" title="${App.t('edit')}" onclick="POSModule.openEditProduct('${p.id}')">✏️</button>
+            <button class="btn btn-danger btn-sm" onclick="POSModule.delProduct('${p.id}','${_esc(p.name).replace(/'/g,"\\'")}')">🗑</button></td></tr>`).join('')
+    }</tbody></table></div>`;
   }
-  function openAddProduct(){_editProdId=null;['pf-name','pf-price','pf-stock'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});document.getElementById('prod-modal-title').textContent=App.t('add_product_title');Modal.open('modal-product');}
+
+  /* ── Product image (chosen from the computer, compressed in the browser and saved on the product) ── */
+  let _pfImage='';
+  function _showImage(){
+    const img=document.getElementById('pf-img-prev'), has=!!_pfImage;
+    if(img){img.hidden=!has; if(has) img.src=_pfImage; else img.removeAttribute('src');}
+    document.getElementById('pf-img-empty').hidden=has;
+    document.getElementById('pf-img-actions').hidden=!has;
+    document.getElementById('pf-img-drop')?.classList.toggle('has-img',has);
+  }
+  function pickImage(){document.getElementById('pf-img-file')?.click();}
+  function removeImage(){_pfImage='';_showImage();}
+  function _loadImg(file){
+    return new Promise((res,rej)=>{const url=URL.createObjectURL(file),im=new Image();
+      im.onload=()=>{URL.revokeObjectURL(url);res(im);}; im.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('bad'));}; im.src=url;});
+  }
+  // longest side ≤ 960px, WebP (JPEG fallback), shrinks until it is small enough for a Firestore document
+  async function _compress(file){
+    const im=await _loadImg(file);
+    let max=960, q=0.82, out='';
+    for(let i=0;i<8;i++){
+      const k=Math.min(1,max/Math.max(im.naturalWidth,im.naturalHeight));
+      const c=document.createElement('canvas'); c.width=Math.max(1,Math.round(im.naturalWidth*k)); c.height=Math.max(1,Math.round(im.naturalHeight*k));
+      const g=c.getContext('2d'); g.fillStyle='#14141A'; g.fillRect(0,0,c.width,c.height); g.drawImage(im,0,0,c.width,c.height);
+      out=c.toDataURL('image/webp',q); if(!out.startsWith('data:image/webp')) out=c.toDataURL('image/jpeg',q);
+      if(out.length<=220000) break;
+      if(q>0.6) q-=0.1; else max=Math.round(max*0.8);
+    }
+    return out;
+  }
+  async function onImageFile(file){
+    if(!file) return;
+    if(!/^image\//.test(file.type)){Toast.warning(App.t('pf_image_bad'));return;}
+    const busy=document.getElementById('pf-img-busy'); if(busy) busy.hidden=false;
+    try{ _pfImage=await _compress(file); _showImage(); }
+    catch(e){ Toast.error(App.t('pf_image_fail')); }
+    finally{ if(busy) busy.hidden=true; }
+  }
+
+  function _fillProductForm(p={}){
+    document.getElementById('pf-name').value=p.name||'';
+    document.getElementById('pf-price').value=p.priceUsd??'';
+    document.getElementById('pf-stock').value=p.stock??'';
+    document.getElementById('pf-cat').value=p.category||'water';
+    _pfImage=p.image||''; _showImage();
+  }
+  function openAddProduct(){_editProdId=null;_fillProductForm();document.getElementById('prod-modal-title').textContent=App.t('add_product_title');Modal.open('modal-product');}
+  function openEditProduct(id){
+    const p=_products.find(x=>x.id===id); if(!p) return;
+    _editProdId=id;_fillProductForm(p);document.getElementById('prod-modal-title').textContent=App.t('edit_product_title');Modal.open('modal-product');
+  }
   async function saveProduct(){
     if(!Validate.form([{id:'pf-name',rules:['required'],label:App.t('name_generic')},{id:'pf-price',rules:['required'],label:App.t('price_generic')}]))return;
     const data={name:document.getElementById('pf-name').value.trim(),priceUsd:Number(document.getElementById('pf-price').value)||0,stock:Number(document.getElementById('pf-stock').value)||null,category:document.getElementById('pf-cat').value,updatedAt:firebase.firestore.FieldValue.serverTimestamp()};
-    if(!_editProdId){data.createdAt=firebase.firestore.FieldValue.serverTimestamp();await _db.collection(COL.PRODUCTS).add(data);}
-    else{await _db.collection(COL.PRODUCTS).doc(_editProdId).update(data);}
-    Toast.success(App.t('saved'));Modal.close('modal-product');await loadProducts();renderInventoryList();
+    try{
+      if(!_editProdId){ if(_pfImage) data.image=_pfImage; data.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await _db.collection(COL.PRODUCTS).add(data); }
+      else{ data.image=_pfImage||firebase.firestore.FieldValue.delete(); await _db.collection(COL.PRODUCTS).doc(_editProdId).update(data); }
+    }catch(e){console.error(e);Toast.error(App.t('error_generic'));return;}
+    // keep cart rows in step with the edited product (name / price / picture)
+    _cart.forEach(c=>{ if(c.id===_editProdId){ c.name=data.name; c.priceUsd=data.priceUsd; c.category=data.category; c.image=_pfImage||''; } });
+    Toast.success(App.t('saved'));Modal.close('modal-product');await loadProducts();renderInventoryList();renderCart();
   }
   function delProduct(id,name){Modal.confirm({title:App.t('delete_product_title'),message:`${App.t('delete_confirm')}<br><strong>${name}</strong>`,type:'danger',confirmText:App.t('delete'),onConfirm:async()=>{await _db.collection(COL.PRODUCTS).doc(id).delete();await loadProducts();renderInventoryList();Toast.success(App.t('deleted'));}});}
 
-  return {render,addToCart,updateQty,clearCart,calcChange,checkout,onSearch,onCat,openInventory,openAddProduct,saveProduct,delProduct};
+  return {render,addToCart,updateQty,clearCart,calcChange,checkout,onSearch,onCat,openInventory,openAddProduct,openEditProduct,saveProduct,delProduct,pickImage,removeImage,onImageFile,viewImage,closeImage,toggleZoom,addFromViewer,
+          switchTab,loadHistory,renderHistory,onHistPeriod,onHistSearch,moreHistory,exportHistory};
 })();
 
 
@@ -568,7 +1000,7 @@ const DietModule = (() => {
         <div class="flex items-center gap-3" style="margin-bottom:14px;justify-content:space-between">
           <div class="flex items-center gap-3">
             <div class="avatar">${initials(p.subscriberName)}</div>
-            <div><div style="font-weight:700">${p.subscriberName}</div><div style="font-size:12px;color:var(--text-muted)">${p.goal||''} · ${DateUtil.format(p.createdAt?.toDate?.()?.toISOString?.()?.split('T')[0])}</div></div>
+            <div><div style="font-weight:700">${p.subscriberName}</div><div style="font-size:12px;color:var(--text-muted)">${p.goal||''} · ${DateUtil.format(p.createdAt)}</div></div>
           </div>
           <div class="flex gap-2">
             <button class="btn btn-outline btn-sm" onclick="DietModule.openEdit('${p.id}')">✏️</button>
@@ -746,7 +1178,7 @@ const UsersModule = (() => {
       const roleColor=roleColors[u.role]||'badge-info';
       const isActive=u.active!==false;
       const name=u.displayName||u.name||'—';
-      const created=DateUtil.format(u.createdAt?.toDate?.()?.toISOString?.()?.split('T')[0]);
+      const created=DateUtil.format(u.createdAt);
       const esc=name.replace(/'/g,"\\'");
       const toggleBtn=u.role!=='super_admin'
         ?`<button class="btn btn-${isActive?'danger':'success'} btn-sm" onclick="UsersModule.toggleActive('${u.id}','${isActive}','${esc}')">${isActive?'🚫 '+App.t('disable_btn'):'✓ '+App.t('enable_btn')}</button>`
@@ -811,7 +1243,7 @@ const UsersModule = (() => {
               <option value="subscriber">${t('subscriber_role')}</option>
             </select>
           </div>
-          <div class="form-group"><label class="form-label">${t('phone')}</label><input class="form-input" id="uf-phone"></div>
+          <div class="form-group"><label class="form-label">${t('phone')}</label><input class="form-input" id="uf-phone" data-phone></div>
           <div id="uf-notice" class="auth-error" style="display:none;margin-top:10px"></div>
         </div>
         <div class="modal-footer">
@@ -928,7 +1360,7 @@ const SettingsModule = (() => {
       </div>
       <div class="settings-layout">
         <div class="settings-nav">
-          ${[['gym','🏋️',t('gym_info_tab')],['subs','⏳',t('subs_settings_tab')],['currency','💰',t('currency_tab')],['whatsapp','💬',t('whatsapp_tab')]].map(([id,icon,label])=>
+          ${[['gym','🏋️',t('gym_info_tab')],['subs','⏳',t('subs_settings_tab')],['currency','💰',t('currency_tab')],['datefmt','📅',t('date_format_tab')],['whatsapp','💬',t('whatsapp_tab')]].map(([id,icon,label])=>
             `<div class="settings-nav-item${id==='gym'?' active':''}" data-tab="${id}" onclick="SettingsModule.switchTab('${id}')">${icon} ${label}</div>`
           ).join('')}
         </div>
@@ -951,9 +1383,9 @@ const SettingsModule = (() => {
         <div class="settings-card">
           <div class="settings-card-title">🏋️ ${App.t('gym_info')}</div>
           <div class="form-group"><label class="form-label">${App.t('gym_name_lbl')}</label><input class="form-input" id="set-gym-name" value="${gymData.gymName||'Venus Gym'}"></div>
-          <div class="form-group"><label class="form-label">${App.t('phone')}</label><input class="form-input" id="set-gym-phone" value="${gymData.gymPhone||''}"></div>
+          <div class="form-group"><label class="form-label">${App.t('phone')}</label><input class="form-input" id="set-gym-phone" data-phone value="${gymData.gymPhone||''}"></div>
           <div class="form-group"><label class="form-label">${App.t('address_generic')}</label><input class="form-input" id="set-gym-address" value="${gymData.gymAddress||''}"></div>
-          <div class="form-group"><label class="form-label">${App.t('whatsapp_number_lbl')}</label><input class="form-input" id="set-gym-wa" value="${gymData.whatsappNumber||''}"></div>
+          <div class="form-group"><label class="form-label">${App.t('whatsapp_number_lbl')}</label><input class="form-input" id="set-gym-wa" data-phone value="${gymData.whatsappNumber||''}"></div>
           <button class="btn btn-primary" onclick="SettingsModule.saveGym()">💾 ${App.t('save')}</button>
         </div>`;
     } else if(tab==='subs'){
@@ -996,6 +1428,20 @@ const SettingsModule = (() => {
           </div>
           <button class="btn btn-primary" onclick="SettingsModule.saveRate()">${App.t('save_rate_btn')}</button>
         </div>`;
+    } else if(tab==='datefmt'){
+      let fmt = AppSettings.dateFormat;
+      try{const d=await _db.collection(COL.SETTINGS).doc('global').get();if(d.exists&&d.data().dateFormat&&DateUtil.FORMATS[d.data().dateFormat])fmt=d.data().dateFormat;}catch(e){}
+      content.innerHTML=`
+        <div class="settings-card">
+          <div class="settings-card-title">📅 ${App.t('date_format_title')}</div>
+          <p class="text-muted" style="font-size:13px;margin:-4px 0 12px">${App.t('date_format_desc')}</p>
+          <div class="exp-chips" id="date-fmt-chips">
+            ${Object.keys(DateUtil.FORMATS).map(k=>`<button type="button" class="exp-chip${k===fmt?' active':''}" data-fmt="${k}" onclick="SettingsModule.pickDateFormat('${k}')">${_fmtSample(k)}</button>`).join('')}
+          </div>
+          <div class="exp-preview" id="date-fmt-preview"></div>
+          <button class="btn btn-primary" style="margin-top:16px" onclick="SettingsModule.saveDateFormat()">💾 ${App.t('save')}</button>
+        </div>`;
+      _pickedFmt = fmt; _previewDateFormat();
     } else if(tab==='whatsapp'){
       content.innerHTML='<div class="page-loader"><div class="spinner"></div></div>';
       await WaSettings.render(content,_db);
@@ -1033,6 +1479,32 @@ const SettingsModule = (() => {
     }catch(e){Toast.error(App.t('error_generic'));}
   }
 
+  /* ── Date display format ── */
+  let _pickedFmt = null;
+  function _fmtSample(k, d = DateUtil.today()){
+    const prev=AppSettings.dateFormat; AppSettings.dateFormat=k;
+    try{ return DateUtil.format(d); } finally { AppSettings.dateFormat=prev; }
+  }
+  function _previewDateFormat(){
+    const el=document.getElementById('date-fmt-preview'); if(!el||!_pickedFmt) return;
+    const a=DateUtil.today(), b=DateUtil.addMonths(a,1);
+    el.innerHTML=App.t('date_format_example').replace('{a}',`<b>${_fmtSample(_pickedFmt,a)}</b>`).replace('{b}',`<b>${_fmtSample(_pickedFmt,b)}</b>`);
+  }
+  function pickDateFormat(k){
+    if(!DateUtil.FORMATS[k]) return;
+    _pickedFmt=k;
+    document.querySelectorAll('#date-fmt-chips .exp-chip').forEach(c=>c.classList.toggle('active',c.dataset.fmt===k));
+    _previewDateFormat();
+  }
+  async function saveDateFormat(){
+    const k=_pickedFmt||AppSettings.dateFormat;
+    try{
+      await _db.collection(COL.SETTINGS).doc('global').set({dateFormat:k,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+      AppSettings.setDateFormat(k);
+      Toast.success(App.t('date_format_saved').replace('{d}',DateUtil.format(DateUtil.today())));
+    }catch(e){Toast.error(App.t('error_generic'));}
+  }
+
   async function saveRate(){
     const rate=Number(document.getElementById('set-rate')?.value)||89500;
     try{
@@ -1049,7 +1521,7 @@ const SettingsModule = (() => {
     }catch(e){Toast.error(App.t('error_generic'));}
   }
 
-  return {render,switchTab,saveGym,saveRate,saveExpiring,setExpiring,stepExpiring,previewExpiring,saveWA};
+  return {render,switchTab,saveGym,saveRate,saveExpiring,setExpiring,stepExpiring,previewExpiring,pickDateFormat,saveDateFormat,saveWA};
 })();
 
 

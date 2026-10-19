@@ -1165,3 +1165,53 @@ body.lang-ar .toast { text-align: right; border-left: none; border-right: 3px so
   animation: ngSpin .7s linear infinite;
 }
 .btn-outline.ng-busy::after, .btn-ghost.ng-busy::after { border-color: rgba(201,168,76,.35); border-top-color: var(--gold-400); }
+
+/* ═══ International phone input (scripts/phone.js) ═══ */
+.pi-field {
+  display: flex; align-items: stretch; width: 100%; min-height: 45px; direction: ltr;
+  background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-md);
+  transition: border-color .15s, box-shadow .15s;
+}
+.pi-field.focus, .pi-field.open { border-color: var(--gold-400); box-shadow: 0 0 0 3px var(--gold-glow); }
+.pi-field:has(+ input.error) { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-bg); }
+.pi-country {
+  display: flex; align-items: center; gap: 7px; padding: 0 10px 0 12px; flex-shrink: 0; cursor: pointer;
+  background: transparent; border: 0; border-inline-end: 1px solid var(--border-subtle); color: var(--text-primary);
+  font: inherit; font-size: 14px; border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+.pi-country:hover { background: var(--bg-hover); }
+.pi-country:disabled { cursor: default; opacity: .6; }
+.pi-flag {
+  display: inline-block; width: 24px; height: 18px; flex-shrink: 0; border-radius: 3px;
+  background-image: url('../assets/flags.webp'); background-size: 1600% auto; background-repeat: no-repeat;
+  box-shadow: 0 0 0 1px rgba(255,255,255,.12), 0 1px 3px rgba(0,0,0,.4);
+}
+.pi-dial { font-weight: 600; font-variant-numeric: tabular-nums; }
+.pi-caret { font-size: 10px; color: var(--text-muted); transition: transform .15s; }
+.pi-field.open .pi-caret { transform: rotate(180deg); }
+.pi-number {
+  flex: 1; min-width: 0; padding: 0 12px; background: transparent; border: 0; outline: none;
+  color: var(--text-primary); font: inherit; font-size: 15px; letter-spacing: .3px; direction: ltr; text-align: left;
+}
+.pi-number::placeholder { color: var(--text-muted); }
+.pi-panel {
+  position: fixed; z-index: 3000; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg-card); border: 1px solid var(--border-default); border-radius: var(--radius-lg);
+  box-shadow: 0 18px 50px rgba(0,0,0,.6); animation: piIn .14s ease;
+}
+.pi-panel[hidden] { display: none; }
+@keyframes piIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.pi-search-wrap { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); }
+.pi-search { flex: 1; min-width: 0; background: transparent; border: 0; outline: none; color: var(--text-primary); font: inherit; font-size: 14px; }
+.pi-list { overflow-y: auto; padding: 6px; }
+.pi-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+.pi-item:hover, .pi-item.hi { background: var(--bg-hover); }
+.pi-item.sel { background: var(--gold-glow); color: var(--gold-300); }
+.pi-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pi-code { color: var(--text-secondary); font-variant-numeric: tabular-nums; direction: ltr; }
+.pi-sep { height: 1px; margin: 6px 4px; background: var(--border-subtle); }
+.pi-empty { padding: 18px; text-align: center; color: var(--text-muted); font-size: 13px; }
+.pi-view { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; direction: ltr; unicode-bidi: isolate; vertical-align: middle; font-variant-numeric: tabular-nums; }
+.pi-view .pi-flag { width: 20px; height: 15px; border-radius: 2px; }
+.pi-view.sm { gap: 5px; }
+.pi-view.sm .pi-flag { width: 16px; height: 12px; }
