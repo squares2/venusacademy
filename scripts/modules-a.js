@@ -704,7 +704,11 @@ const SubscriptionsModule = (() => {
     const remColor=remaining>0?'var(--danger)':'var(--success)';
     const badges = subBadges(s);
     const esc=(s.subscriberName||'').replace(/'/g,"\\'");
-    const payBtn=remaining>0?`<button class="btn btn-success btn-sm" onclick="SubscriptionsModule.payRemaining('${s.id}','${esc}',${remaining})">💰 ${App.t('pay_btn')}</button>`:'';
+    const payBtn=remaining>0
+      ? `<button class="btn btn-success btn-sm" onclick="SubscriptionsModule.payRemaining('${s.id}','${esc}',${remaining})">💰 ${App.t('pay_btn')}</button>`
+      : _canPayNext(s)
+        ? `<button class="btn btn-success btn-sm" title="${App.t('pay_next_hint')}" onclick="SubscriptionsModule.payNext('${s.id}')">💰 ${App.t('pay_btn')}</button>`
+        : '';
     const latestTag = isLatest ? `<span class="subs-latest-tag">${App.t('latest_word')}</span>` : '';
     const sel = _selected.has(s.id);
     const trAttrs = (child
@@ -1444,6 +1448,76 @@ const SubscriptionsModule = (() => {
     });
   }
 
+  /* ── Pay next period early ─────────────────────────────
+     A fully-paid subscription whose period has already started (today ≥ start)
+     and that has no follow-up yet can be paid ahead: creates the next period
+     (starts on this one's end date, same months / coach, sport's CURRENT price)
+     marked fully paid. Auto-renew moves to the new record, like a renewal. ── */
+  function _hasNext(s){
+    if (s.renewedToId) return true;
+    return _all.some(x => x.id !== s.id && _subKey(x) === _subKey(s) && x.sportId === s.sportId
+      && (x.startDate||'') >= (s.endDate||''));
+  }
+  function _canPayNext(s){
+    if (s.frozen || !s.startDate || !s.endDate) return false;
+    if ((s.totalAmount||0) - (s.amountPaid||0) > 0) return false;
+    const today = DateUtil.today();
+    if (s.startDate > today || s.endDate < today) return false; // only during its current month
+    return !_hasNext(s);
+  }
+
+  function payNext(id){
+    const s = _all.find(x => x.id === id);
+    if (!s || !_canPayNext(s)) return;
+    const sport = _sports.find(x => x.id === s.sportId);
+    if (!sport) { Toast.error(App.t('error_generic')); return; }
+    const coach = _coaches.find(c => c.id === s.coachId) || null;
+    const months = Number(s.months) || monthsBetween(s.startDate, s.endDate);
+    const startDate = s.endDate;
+    const endDate = DateUtil.addMonths(startDate, months);
+    const total = (Number(sport.price) || 0) * months;
+    Modal.confirm({title:App.t('record_payment_title'),
+      message:`${App.t('confirm_payment_of')} <strong>${Currency.formatUSD(total)}</strong> ${App.t('for_member')} <strong>${s.subscriberName||''}</strong><br>
+        <span style="font-size:12px;color:var(--text-muted)">${App.t('pay_next_period')}: ${DateUtil.format(startDate)} → ${DateUtil.format(endDate)}</span>`,
+      type:'success',confirmText:App.t('confirm_payment_btn'),
+      onConfirm:()=>{
+        const cur = _all.find(x => x.id === id);
+        if (!cur || !_canPayNext(cur)) return; // paid / renewed meanwhile
+        const data = {
+          subscriberId: s.subscriberId, subscriberName: s.subscriberName || '',
+          sportId: sport.id, sportName: sport.name || s.sportName || '',
+          coachId: s.coachId || null,
+          coachName: coach ? coach.name : (s.coachName || null),
+          coachCommission: coach ? (coach.commission || 0) : (s.coachCommission || 0),
+          totalAmount: total, amountPaid: total, paymentMethod: 'paid',
+          startDate, endDate, months,
+          autoRenew: !!s.autoRenew,
+          renewedFromId: s.id,
+          notes: '',
+        };
+        const newRef = _db.collection(COL.SUBSCRIPTIONS).doc();
+        const batch = _db.batch();
+        batch.set(newRef, { ...data, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+        batch.update(_db.collection(COL.SUBSCRIPTIONS).doc(s.id), { autoRenew: false, renewedToId: newRef.id });
+        // Like save(): don't wait for the server — weak connections apply locally and sync later.
+        const write = batch.commit();
+        Object.assign(cur, { autoRenew: false, renewedToId: newRef.id });
+        _all.unshift(_computeStatus({ ...data, id: newRef.id }));
+        try { buildDebtMap(); renderDebtPanel(); renderTable(getFiltered()); } catch(_) {}
+        write.then(() => {
+          if (typeof WaQueue !== 'undefined') WaQueue.onPayment(_db, { ...data, id: newRef.id }, total);
+          logActivity(_db, 'payment_recorded', { subscriber: data.subscriberName, subscriberId: data.subscriberId, sport: data.sportName, amount: total });
+          Toast.success(App.t('payment_recorded'));
+          if (document.getElementById('subs-tbody')) loadData().catch(()=>{});
+        }).catch(e => {
+          console.error('Pay next failed', e);
+          Toast.error(App.t('error_generic'));
+          if (document.getElementById('subs-tbody')) loadData().catch(()=>{});
+        });
+      }
+    });
+  }
+
 
 
   /* ══ Outstanding balances radar ═════════════════════════
@@ -1920,7 +1994,7 @@ const SubscriptionsModule = (() => {
     }});
   }
 
-  return {render,openNew,openEdit,save,resetEndDate,payRemaining,del,
+  return {render,openNew,openEdit,save,resetEndDate,payRemaining,payNext,del,
            toggleSelect,selectGroup,selectPage,clearSelection,bulkStartDate,bulkCoach,bulkDelete,bulkPay,
            openFreeze,openUnfreeze,bulkFreeze,bulkUnfreeze,
            toggleDebtPanel,refreshDebtPanel:()=>renderDebtPanel(),debtToggleAll,debtFilter,debtView,debtRemind,debtSettle,onSearch,onFilter,onDateFilter,goPage,toggleGroup,toggleAllGroups,processAutoRenewals,
