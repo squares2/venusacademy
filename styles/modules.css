@@ -1213,6 +1213,20 @@ body.lang-ar .debt-radar.is-collapsed .debt-caret { transform: rotate(90deg); }
 .wa-install-box summary { cursor: pointer; font-weight: 700; color: var(--gold-400); }
 .wa-install-box ol { margin: 10px 0 2px; padding-inline-start: 22px; display: grid; gap: 6px; font-size: 13.5px; color: var(--text-secondary); }
 .wa-install-box b { color: var(--text-primary); }
+.wa-filters { padding: 12px 14px; border-radius: var(--radius-lg); background: var(--bg-card); border: 1px solid var(--border-subtle); margin-bottom: 14px; }
+.wa-filters.is-on { border-color: var(--gold-400); }
+.wa-f-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.wa-f-row .form-input, .wa-f-row .form-select { width: auto; min-width: 150px; padding-top: 8px; padding-bottom: 8px; font-size: 13px; }
+.wa-f-row .wa-f-q { flex: 1 1 220px; }
+.wa-f-custom { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.wa-f-custom[hidden] { display: none; }
+.wa-f-custom label { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-secondary); }
+.wa-f-custom .form-input { min-width: 140px; }
+.wa-f-info { display: inline-flex; align-items: center; gap: 8px; margin-inline-start: auto; font-size: 12.5px; color: var(--text-secondary); }
+.wa-f-info b { color: var(--gold-400); }
+.wa-f-hint { color: var(--gold-400); font-weight: 600; }
+.wa-control-bar .btn[disabled] { opacity: .45; pointer-events: none; }
+@media (max-width: 620px) { .wa-f-row .form-input, .wa-f-row .form-select { flex: 1 1 100%; min-width: 0; } .wa-f-info { margin-inline-start: 0; } }
 .wa-tabs { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
 .wa-tab { padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border-subtle); background: var(--bg-card); color: var(--text-secondary); cursor: pointer; font-weight: 600; font-size: 13px; }
 .wa-tab span { margin-inline-start: 6px; padding: 0 7px; border-radius: 999px; background: var(--bg-hover); font-size: 11.5px; }

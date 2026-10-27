@@ -42,6 +42,11 @@ const WaI18n = (() => {
     sel_all: 'Select all', selected: 'selected', send_sel: 'Send selected', skip_sel: 'Skip', retry_sel: 'Move to pending', del_sel: 'Delete',
     del_sel_title: 'Delete messages', del_sel_msg: 'Delete {n} selected message(s)? This cannot be undone.',
     bulk_done: 'message(s) updated', bulk_deleted: 'message(s) deleted', sending_sel: 'Sending only the selected messages…',
+    f_search: 'Subscriber name or phone…', f_sport_all: 'All sports', f_type_all: 'All types', f_date_all: 'Any date',
+    f_today: 'Today', f_yesterday: 'Yesterday', f_last7: 'Last 7 days', f_last30: 'Last 30 days', f_this_month: 'This month', f_last_month: 'Last month', f_custom: 'Custom range…',
+    f_from: 'From', f_to: 'To', f_clear: 'Clear filters', f_showing: 'Showing {n} of {t}',
+    send_filtered: 'Send filtered', sending_filtered: 'Sending only the filtered messages…', f_none_pending: 'No waiting messages match the filter',
+    f_active_hint: 'Filter is on — only the waiting messages that match it will be sent.',
     // settings
     s_title: 'WhatsApp messages', s_sender: 'Sender', s_daily: 'Daily limit (messages)', s_min: 'Min pause (seconds)', s_max: 'Max pause (seconds)',
     s_unpaid_every: 'Repeat unpaid reminder every (days)', s_autoscan: 'Check for new reminders automatically when the app opens',
@@ -85,6 +90,11 @@ const WaI18n = (() => {
     sel_all: 'تحديد الكل', selected: 'محدد', send_sel: 'إرسال المحدد', skip_sel: 'تخطي', retry_sel: 'إرجاع للانتظار', del_sel: 'حذف',
     del_sel_title: 'حذف الرسائل', del_sel_msg: 'حذف {n} رسالة/رسائل محددة؟ لا يمكن التراجع عن ذلك.',
     bulk_done: 'رسالة/رسائل تم تحديثها', bulk_deleted: 'رسالة/رسائل تم حذفها', sending_sel: 'جارٍ إرسال الرسائل المحددة فقط…',
+    f_search: 'اسم المشترك أو رقمه…', f_sport_all: 'كل الرياضات', f_type_all: 'كل الأنواع', f_date_all: 'أي تاريخ',
+    f_today: 'اليوم', f_yesterday: 'أمس', f_last7: 'آخر 7 أيام', f_last30: 'آخر 30 يوماً', f_this_month: 'هذا الشهر', f_last_month: 'الشهر الماضي', f_custom: 'فترة مخصصة…',
+    f_from: 'من', f_to: 'إلى', f_clear: 'مسح الفلاتر', f_showing: 'عرض {n} من {t}',
+    send_filtered: 'إرسال المفلتر', sending_filtered: 'جارٍ إرسال الرسائل المفلترة فقط…', f_none_pending: 'لا توجد رسائل منتظرة مطابقة للفلتر',
+    f_active_hint: 'الفلتر مفعّل — سيتم إرسال الرسائل المنتظرة المطابقة له فقط.',
     s_title: 'رسائل واتساب', s_sender: 'المُرسِل', s_daily: 'الحد اليومي (رسائل)', s_min: 'أقل توقف (ثوانٍ)', s_max: 'أكثر توقف (ثوانٍ)',
     s_unpaid_every: 'تكرار تذكير الرصيد كل (أيام)', s_autoscan: 'البحث عن تذكيرات جديدة تلقائياً عند فتح التطبيق',
     s_types: 'أنواع الرسائل', s_active: 'مفعّل', s_inactive: 'غير مفعّل', s_template: 'نص الرسالة', s_placeholders: 'اضغط للإدراج:',
@@ -167,7 +177,7 @@ const WaQueue = (() => {
   const fmtD = d => DateUtil.format(d, (typeof App !== 'undefined' && App.lang) || 'en');
 
   // Adds one message unless that type is switched off or the same key already exists.
-  async function enqueue(db, { type, key, subscriberId, name, phone, vars }) {
+  async function enqueue(db, { type, key, subscriberId, name, phone, vars, sports }) {
     const s = await getSettings(db);
     const cfg = s.types[type];
     if (!cfg || !cfg.active) return null;
@@ -184,6 +194,7 @@ const WaQueue = (() => {
       if (snap.exists) return null;
       tx.set(ref, {
         type, key, subscriberId: subscriberId || null, name: name || '', phone: num, text,
+        sports: Array.isArray(sports) ? sports : (vars && vars.sport ? [vars.sport] : []),
         status: num ? 'pending' : 'skipped', error: num ? null : 'no_phone',
         createdAt: firebase.firestore.FieldValue.serverTimestamp(), createdDate: DateUtil.today(),
       });
@@ -237,6 +248,7 @@ const WaQueue = (() => {
     const key = `unpaid_manual_${subscriberId}_${Date.now()}`;
     await db.collection(COL_Q).doc(safeId(key)).set({
       type: 'unpaid', key, subscriberId: subscriberId || null, name: name || '', phone: num, text, manual: true,
+      sports: [...new Set(rows.map(x => x.sportName).filter(Boolean))],
       status: 'pending', error: null,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(), createdDate: DateUtil.today(),
     });
@@ -296,6 +308,7 @@ const WaQueue = (() => {
           const id = await enqueue(db, {
             type: 'unpaid', key: `unpaid_${sid}_${bucket}`, subscriberId: sid, name: o.name,
             vars: { count: o.items.length, total_owed: fmt$(total), list },
+            sports: [...new Set(o.items.map(x => x.sportName).filter(Boolean))],
           }).catch(() => null);
           if (id) added++;
         }
@@ -439,6 +452,73 @@ const WaPage = (() => {
   let _db, _items = [], _tab = 'pending', _unsubSnap = null, _unsubSender = null, _tick = null, _waTab = false, _sentToday = 0, _limit = 40;
   const TYPE_ICON = { expiring: '⏳', unpaid: '💸', renewal: '🔁', payment: '✅' };
 
+  /* ── Filters (subscriber / sport / type / date) ───────
+     Kept while the app is open. When any filter is on, Start sends
+     only the waiting messages that match it. */
+  const _f = { q: '', sport: '', type: '', date: '', from: '', to: '' };
+  let _subMap = new Map(), _subBySub = new Map(), _subMapAt = 0;
+
+  // Sport names for older queue items that were saved without `sports`
+  async function loadSubMap(force = false) {
+    if (!force && _subMapAt && Date.now() - _subMapAt < 5 * 60000) return;
+    try {
+      const snap = await _db.collection(COL.SUBSCRIPTIONS).get();
+      _subMap = new Map(); _subBySub = new Map();
+      snap.docs.forEach(d => {
+        const x = d.data(); _subMap.set(d.id, x.sportName || '');
+        if (x.subscriberId && x.sportName) {
+          if (!_subBySub.has(x.subscriberId)) _subBySub.set(x.subscriberId, new Set());
+          _subBySub.get(x.subscriberId).add(x.sportName);
+        }
+      });
+      _subMapAt = Date.now();
+    } catch (_) {}
+  }
+  function sportsOf(x) {
+    if (Array.isArray(x.sports) && x.sports.length) return x.sports;
+    const m = /^(expiring|renewal|payment)_([^_]+)/.exec(x.key || '');
+    if (m && _subMap.get(m[2])) return [_subMap.get(m[2])];
+    return x.subscriberId && _subBySub.has(x.subscriberId) ? [..._subBySub.get(x.subscriberId)] : [];
+  }
+
+  const ymd = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  function dateRange() {
+    const now = new Date(), today = ymd(now), back = n => { const d = new Date(); d.setDate(d.getDate() - n); return ymd(d); };
+    switch (_f.date) {
+      case 'today': return [today, today];
+      case 'yesterday': return [back(1), back(1)];
+      case 'last7': return [back(6), today];
+      case 'last30': return [back(29), today];
+      case 'this_month': return [ymd(new Date(now.getFullYear(), now.getMonth(), 1)), today];
+      case 'last_month': return [ymd(new Date(now.getFullYear(), now.getMonth() - 1, 1)), ymd(new Date(now.getFullYear(), now.getMonth(), 0))];
+      case 'custom': { let a = _f.from || '0000-01-01', b = _f.to || '9999-12-31'; if (a > b) [a, b] = [b, a]; return [a, b]; }
+      default: return null;
+    }
+  }
+  // Sent messages are filtered by the day they were sent, the rest by the day they were queued
+  function itemDate(x) {
+    if (x.status === 'sent' && x.sentDate) return x.sentDate;
+    if (x.createdDate) return x.createdDate;
+    const d = x.createdAt?.toDate?.(); return d ? ymd(d) : '';
+  }
+  const filterOn = () => !!(_f.q.trim() || _f.sport || _f.type || (_f.date && (_f.date !== 'custom' || _f.from || _f.to)));
+  function matches(x) {
+    if (_f.type && x.type !== _f.type) return false;
+    if (_f.sport && !sportsOf(x).includes(_f.sport)) return false;
+    const q = _f.q.trim().toLowerCase();
+    if (q) {
+      const digits = q.replace(/\D/g, '').replace(/^0+/, '');
+      const byName = String(x.name || '').toLowerCase().includes(q);
+      const byPhone = digits.length >= 3 && String(x.phone || '').includes(digits);
+      if (!byName && !byPhone) return false;
+    }
+    const r = dateRange();
+    if (r) { const d = itemDate(x); if (!d || d < r[0] || d > r[1]) return false; }
+    return true;
+  }
+  const _filtered = () => _items.filter(matches);
+  const _filteredPending = () => _filtered().filter(x => x.status === 'pending');
+
   async function render(db) {
     _db = db;
     const content = document.getElementById('page-content');
@@ -455,6 +535,7 @@ const WaPage = (() => {
       <div class="wa-status-row" id="wa-status-row"></div>
       <div class="wa-control" id="wa-control"></div>
       <div class="wa-install" id="wa-install"></div>
+      <div class="wa-filters" id="wa-filters"></div>
       <div class="wa-tabs" id="wa-tabs"></div>
       <div class="wa-list" id="wa-list"><div class="page-loader"><div class="spinner"></div></div></div>`;
 
@@ -465,13 +546,14 @@ const WaPage = (() => {
       if (!document.getElementById('wa-list')) return cleanup();
       _items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       _sentToday = _items.filter(x => x.sentDate === DateUtil.today()).length;
-      renderStatus(); renderTabs(); renderList();
+      renderStatus(); renderSportOptions(); renderTabs(); renderList(); renderControl();
     }, () => {
       document.getElementById('wa-list').innerHTML = `<p style="color:var(--danger)">${App.t('failed_load_data')}</p>`;
     });
 
     WaQueue.getSettings(db).then(s => { _limit = s.sender.dailyLimit; renderStatus(); });
-    renderControl(); renderInstall();
+    renderControl(); renderInstall(); renderFilters();
+    loadSubMap().then(() => { if (!document.getElementById('wa-list')) return; renderSportOptions(); renderTabs(); renderList(); renderControl(); });
     refreshExt();
     WaQueue.autoScan(db).catch(() => {});
   }
@@ -509,11 +591,15 @@ const WaPage = (() => {
     const paused = st.paused && !st.running
       ? `<div class="wa-paused">⚠️ ${L('paused_' + st.paused)}</div>` : '';
     const counters = (st.sent || st.failed) ? `<span class="wa-run-count">✅ ${st.sent} · ❌ ${st.failed}</span>` : '';
+    const fOn = filterOn(), fN = fOn ? _filteredPending().length : 0;
+    if (fOn && !st.running && !st.paused) line = `<span class="wa-f-hint">🔎 ${L('f_active_hint')}</span>`;
     el.innerHTML = `
       <div class="wa-control-bar">
         ${st.running
           ? `<button class="btn btn-danger" onclick="WaSender.stop()">⏹ ${L('stop')}</button>`
-          : `<button class="btn btn-primary" onclick="WaPage.start()">▶ ${L('start')}</button>`}
+          : fOn
+            ? `<button class="btn btn-primary" ${fN ? '' : 'disabled'} onclick="WaPage.start()">▶ ${L('send_filtered')} (${fN})</button>`
+            : `<button class="btn btn-primary" onclick="WaPage.start()">▶ ${L('start')}</button>`}
         <button class="btn btn-outline" onclick="WaPage.scanNow(this)">🔍 ${L('scan')}</button>
         <button class="btn btn-ghost" onclick="WaSender.focusWa()" ${WaSender.extVersion() ? '' : 'disabled'}>🟩 ${L('open_wa')}</button>
         <div class="wa-control-line">${line} ${counters}</div>
@@ -534,7 +620,8 @@ const WaPage = (() => {
 
   function renderTabs() {
     const el = document.getElementById('wa-tabs'); if (!el) return;
-    const c = s => _items.filter(x => (s === 'failed' ? (x.status === 'failed') : x.status === s) || (s === 'pending' && x.status === 'sending')).length;
+    const src = _filtered();
+    const c = s => src.filter(x => (s === 'failed' ? (x.status === 'failed') : x.status === s) || (s === 'pending' && x.status === 'sending')).length;
     el.innerHTML = ['pending', 'sent', 'failed', 'skipped'].map(s =>
       `<button class="wa-tab ${_tab === s ? 'active' : ''}" onclick="WaPage.setTab('${s}')">${L('st_' + s)} <span>${c(s)}</span></button>`).join('');
   }
@@ -578,8 +665,77 @@ const WaPage = (() => {
     renderBulk();
   }
 
+  /* ── Filter bar ──────────────────────────────────── */
+  function renderFilters() {
+    const el = document.getElementById('wa-filters'); if (!el) return;
+    const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    const opt = (v, label, cur) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(label)}</option>`;
+    const dates = ['today', 'yesterday', 'last7', 'last30', 'this_month', 'last_month', 'custom'];
+    el.innerHTML = `
+      <div class="wa-f-row">
+        <input class="form-input wa-f-q" type="search" id="wa-f-q" list="wa-f-names" placeholder="🔎 ${L('f_search')}" value="${esc(_f.q)}" oninput="WaPage.setFilter('q',this.value)">
+        <datalist id="wa-f-names"></datalist>
+        <select class="form-select" id="wa-f-sport" onchange="WaPage.setFilter('sport',this.value)"></select>
+        <select class="form-select" id="wa-f-type" onchange="WaPage.setFilter('type',this.value)">
+          ${opt('', L('f_type_all'), _f.type)}${WaQueue.TYPES.map(k => opt(k, `${TYPE_ICON[k]} ${L('type_' + k)}`, _f.type)).join('')}
+        </select>
+        <select class="form-select" id="wa-f-date" onchange="WaPage.setFilter('date',this.value)">
+          ${opt('', L('f_date_all'), _f.date)}${dates.map(k => opt(k, L('f_' + k), _f.date)).join('')}
+        </select>
+        <span class="wa-f-custom" ${_f.date === 'custom' ? '' : 'hidden'}>
+          <label>${L('f_from')} <input class="form-input" type="date" value="${esc(_f.from)}" onchange="WaPage.setFilter('from',this.value)"></label>
+          <label>${L('f_to')} <input class="form-input" type="date" value="${esc(_f.to)}" onchange="WaPage.setFilter('to',this.value)"></label>
+        </span>
+        <span class="wa-f-info" id="wa-f-info"></span>
+      </div>`;
+    renderSportOptions();
+  }
+
+  function renderSportOptions() {
+    const sel = document.getElementById('wa-f-sport'); if (!sel) return;
+    const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    const names = new Set(); _items.forEach(x => sportsOf(x).forEach(n => n && names.add(n)));
+    if (_f.sport) names.add(_f.sport);
+    const list = [...names].sort((a, b) => a.localeCompare(b));
+    const html = `<option value="">${L('f_sport_all')}</option>` + list.map(n => `<option value="${esc(n)}" ${n === _f.sport ? 'selected' : ''}>${esc(n)}</option>`).join('');
+    if (sel.dataset.h !== html) { sel.innerHTML = html; sel.dataset.h = html; }
+    const dl = document.getElementById('wa-f-names');
+    if (dl) {
+      const nm = [...new Set(_items.map(x => x.name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+      const h = nm.map(n => `<option value="${esc(n)}"></option>`).join('');
+      if (dl.dataset.h !== h) { dl.innerHTML = h; dl.dataset.h = h; }
+    }
+    renderFilterInfo();
+  }
+
+  function renderFilterInfo() {
+    const el = document.getElementById('wa-f-info'); if (!el) return;
+    el.innerHTML = filterOn()
+      ? `<span>${L('f_showing').replace('{n}', `<b>${_filtered().length}</b>`).replace('{t}', _items.length)}</span>
+         <button class="btn btn-ghost btn-sm" onclick="WaPage.clearFilters()">✕ ${L('f_clear')}</button>`
+      : '';
+    document.getElementById('wa-filters')?.classList.toggle('is-on', filterOn());
+  }
+
+  function setFilter(k, v) {
+    _f[k] = v || '';
+    if (k === 'date') {
+      const c = document.querySelector('#wa-filters .wa-f-custom');
+      if (c) c.hidden = v !== 'custom';
+      if (v !== 'custom') { _f.from = ''; _f.to = ''; c?.querySelectorAll('input').forEach(i => { i.value = ''; }); }
+    }
+    _sel.clear();
+    renderFilterInfo(); renderTabs(); renderList(); renderControl();
+  }
+
+  function clearFilters() {
+    Object.keys(_f).forEach(k => { _f[k] = ''; });
+    _sel.clear();
+    renderFilters(); renderTabs(); renderList(); renderControl();
+  }
+
   /* ── Multi-select ─────────────────────────────────── */
-  const _tabList = () => _items.filter(x => x.status === _tab || (_tab === 'pending' && x.status === 'sending'));
+  const _tabList = () => _items.filter(x => (x.status === _tab || (_tab === 'pending' && x.status === 'sending')) && matches(x));
   const _selectable = () => _tabList().filter(x => x.status !== 'sending');
   const _selItems = () => _selectable().filter(x => _sel.has(x.id));
 
@@ -662,7 +818,18 @@ const WaPage = (() => {
   }
 
   function setTab(t) { if (t !== _tab) _sel.clear(); _tab = t; renderTabs(); renderList(); }
-  function start() { WaSender.start(_db).then(refreshExt); }
+  function start() {
+    if (WaSender.state.running) return;
+    if (filterOn()) {
+      const ts = d => d.createdAt?.toMillis?.() || 0;
+      const ids = _filteredPending().sort((a, b) => ts(a) - ts(b)).map(x => x.id);
+      if (!ids.length) { Toast.info(L('f_none_pending')); return; }
+      Toast.info(L('sending_filtered'));
+      WaSender.start(_db, ids).then(refreshExt);
+      return;
+    }
+    WaSender.start(_db).then(refreshExt);
+  }
   async function scanNow(btn) {
     try { localStorage.removeItem('venus_wa_scan'); } catch (_) {}
     const n = await WaQueue.scan(_db).catch(() => 0);
@@ -697,7 +864,7 @@ const WaPage = (() => {
   }
 
   return { render, setTab, start, scanNow, setStatus, markSent, remove, edit,
-           toggleSel, selectAll, bulkStatus, bulkDelete, sendSelected };
+           toggleSel, selectAll, bulkStatus, bulkDelete, sendSelected, setFilter, clearFilters };
 })();
 
 /* ═══════════════════════════════════════════════════ */

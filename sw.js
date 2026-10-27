@@ -2,7 +2,7 @@
 //  VENUS GYM — Service Worker (PWA)
 // ═══════════════════════════════════════════════════
 
-const CACHE_NAME = 'venus-gym-v33';
+const CACHE_NAME = 'venus-gym-v34';
 
 const STATIC_ASSETS = [
   './',
