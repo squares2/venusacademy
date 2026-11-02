@@ -528,6 +528,7 @@ const SubscriptionsModule = (() => {
           <button class="btn btn-success btn-sm" onclick="SubscriptionsModule.bulkPay()">💰 ${t('pay_btn')}</button>
           <button class="btn btn-outline btn-sm" onclick="SubscriptionsModule.bulkStartDate()">📅 ${t('bulk_change_start')}</button>
           <button class="btn btn-outline btn-sm" onclick="SubscriptionsModule.bulkCoach()">🏋️ ${t('bulk_change_coach')}</button>
+          <button class="btn btn-outline btn-sm" onclick="SubscriptionsModule.bulkMonthly()">💵 ${t('bulk_set_monthly')}</button>
           <button class="btn btn-outline btn-sm subs-bulk-freeze" onclick="SubscriptionsModule.bulkFreeze()">❄ ${t('freeze_word')}</button>
           <button class="btn btn-outline btn-sm subs-bulk-freeze" onclick="SubscriptionsModule.bulkUnfreeze()">☀️ ${t('unfreeze_word')}</button>
           <button class="btn btn-danger btn-sm" onclick="SubscriptionsModule.bulkDelete()">🗑 ${t('delete')}</button>
@@ -1893,6 +1894,58 @@ const SubscriptionsModule = (() => {
     preview();
   }
 
+  /* ── Bulk: set the monthly amount. Total = monthly × each one's months;
+        the amount already paid is kept, so status becomes paid / partial / unpaid. ── */
+  function bulkMonthly() {
+    const items = _selItems(); if (!items.length) return;
+    const monthsOf = x => Number(x.months) || monthsBetween(x.startDate, x.endDate) || 1;
+    const methodOf = (total, paid) => paid <= 0 ? 'unpaid' : paid < total ? 'partial' : 'paid';
+    const sports = [...new Set(items.map(x => x.sportId))];
+    const sp = sports.length === 1 ? _sports.find(x => x.id === sports[0]) : null;
+    const first = items[0];
+    const guess = sp ? (Number(sp.price) || '') : ((first.totalAmount || 0) / monthsOf(first) || '');
+    const el = _bulkModal({
+      title: `💵 ${App.t('bulk_set_monthly')}`,
+      confirmText: `${App.t('apply_to')} ${items.length}`,
+      body: `
+        ${_selSummary(items)}
+        <div class="form-group">
+          <label class="form-label">${App.t('monthly_amount_lbl')} ($) <span class="required">*</span></label>
+          <input class="form-input" type="number" min="0" step="0.01" id="bulk-monthly" value="${guess}">
+        </div>
+        <div class="text-muted" style="font-size:12px;margin:-4px 0 12px">${App.t('bulk_monthly_hint')}</div>
+        <div class="subs-bulk-preview" id="bulk-monthly-preview"></div>`,
+      onConfirm: async () => {
+        const raw = document.getElementById('bulk-monthly').value;
+        const monthly = Number(raw);
+        if (raw === '' || !(monthly >= 0)) { Toast.error(App.t('monthly_amount_lbl')); return false; }
+        await _commitInChunks(items, (b, ref, x) => {
+          const total = Math.round(monthly * monthsOf(x) * 100) / 100;
+          b.update(ref, { totalAmount: total, paymentMethod: methodOf(total, x.amountPaid || 0) });
+        });
+        await Promise.all(items.map(x => logActivity(_db, 'subscription_updated', { subscriber: x.subscriberName, subscriberId: x.subscriberId, sport: x.sportName, amount: Math.round(monthly * monthsOf(x) * 100) / 100, paid: x.amountPaid })));
+        Toast.success(`${items.length} ${App.t('bulk_updated')}`);
+        _selected.clear(); await loadData();
+      },
+    });
+    const preview = () => {
+      const monthly = Number(el.querySelector('#bulk-monthly').value) || 0;
+      const rows = items.slice(0, 8).map(x => {
+        const total = monthly * monthsOf(x), rem = total - (x.amountPaid || 0);
+        return `
+        <div class="subs-bulk-prow">
+          <span class="subs-bulk-pname">${x.subscriberName||'—'} <small>${x.sportName||''} · ${monthsOf(x)} ${App.t('months_word')}</small></span>
+          <span class="subs-bulk-pdates"><s>${Currency.formatUSD(x.totalAmount || 0)}</s>
+            <b>${Currency.formatUSD(total)}</b>${rem > 0 ? ` <small style="color:var(--danger)">(${Currency.formatUSD(rem)})</small>` : ''}</span>
+        </div>`; }).join('');
+      el.querySelector('#bulk-monthly-preview').innerHTML = rows +
+        (items.length > 8 ? `<div class="text-muted" style="font-size:12px;padding-top:6px">+${items.length - 8} ${App.t('more_word')}</div>` : '');
+    };
+    el.querySelector('#bulk-monthly').addEventListener('input', preview);
+    preview();
+    setTimeout(() => el.querySelector('#bulk-monthly')?.select(), 50);
+  }
+
   /* ── Bulk: change coach (commission follows the new coach) ── */
   function bulkCoach() {
     const items = _selItems(); if (!items.length) return;
@@ -2048,7 +2101,7 @@ const SubscriptionsModule = (() => {
   }
 
   return {render,openNew,openEdit,save,resetEndDate,payRemaining,payNext,del,
-           toggleSelect,selectGroup,selectPage,clearSelection,bulkStartDate,bulkCoach,bulkDelete,bulkPay,
+           toggleSelect,selectGroup,selectPage,clearSelection,bulkStartDate,bulkCoach,bulkMonthly,bulkDelete,bulkPay,
            openFreeze,openUnfreeze,bulkFreeze,bulkUnfreeze,
            toggleDebtPanel,refreshDebtPanel:()=>renderDebtPanel(),debtToggleAll,debtFilter,debtView,debtRemind,debtSettle,onSearch,onFilter,onDateFilter,goPage,toggleGroup,toggleAllGroups,processAutoRenewals,
            onSubscriberSearch,selectSubscriber,hideSubscriberDropdown,
