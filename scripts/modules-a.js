@@ -1934,33 +1934,86 @@ const SubscriptionsModule = (() => {
   /* ── Bulk: pay remaining balance of every selected unpaid/partial subscription ── */
   function bulkPay() {
     const all = _selItems(); if (!all.length) return;
+    // 1) unpaid / partial → settle the remaining balance
     const items = all.filter(x => _rem(x) > 0);
-    const skipped = all.length - items.length;
-    if (!items.length) return Toast.info(App.t('bulk_pay_none'));
+    // 2) fully paid & running this month → pay the next month(s), like the row "Pay" button
+    const monthsOf = x => Number(x.months) || monthsBetween(x.startDate, x.endDate);
+    const nexts = all.filter(x => _rem(x) <= 0 && _canPayNext(x)).map(x => {
+      const sport = _sports.find(sp => sp.id === x.sportId);
+      if (!sport) return null;
+      const months = monthsOf(x);
+      const startDate = x.endDate;
+      return { s: x, sport, months, startDate, endDate: DateUtil.addMonths(startDate, months),
+               total: (Number(sport.price) || 0) * months };
+    }).filter(Boolean);
+    const skipped = all.length - items.length - nexts.length;
+    if (!items.length && !nexts.length) return Toast.info(App.t('bulk_pay_none'));
     const owed = items.reduce((a, x) => a + _rem(x), 0);
+    const nextSum = nexts.reduce((a, n) => a + n.total, 0);
+    const grand = owed + nextSum;
     const rows = items.map(x => `
       <div class="subs-bulk-prow">
         <span class="subs-bulk-pname">${x.subscriberName||'—'} <small>${x.sportName||''} · ${DateUtil.format(x.startDate)}</small></span>
         <span class="subs-bulk-pdates"><b>${Currency.formatUSD(_rem(x))}</b></span>
       </div>`).join('');
+    const nextRows = nexts.map(n => `
+      <div class="subs-bulk-prow">
+        <span class="subs-bulk-pname">${n.s.subscriberName||'—'} <small>${n.sport.name||n.s.sportName||''} · ${DateUtil.format(n.startDate)} → ${DateUtil.format(n.endDate)}</small></span>
+        <span class="subs-bulk-pdates"><b>${Currency.formatUSD(n.total)}</b></span>
+      </div>`).join('');
+    const secTitle = txt => `<div class="text-muted" style="font-size:12px;font-weight:700;margin:10px 0 4px">${txt}</div>`;
     _bulkModal({
       title: `💰 ${App.t('record_payment_title')}`,
       confirmClass: 'btn-success',
-      confirmText: `${App.t('confirm_payment_btn')} (${items.length})`,
+      confirmText: `${App.t('confirm_payment_btn')} (${items.length + nexts.length})`,
       body: `
-        ${_selSummary(items)}
+        ${_selSummary(all)}
         <div style="text-align:center;margin:6px 0 12px">
           <div class="text-muted" style="font-size:12px">${App.t('bulk_pay_total')}</div>
-          <div style="font-size:24px;font-weight:700;color:var(--success)">${Currency.formatUSD(owed)}</div>
+          <div style="font-size:24px;font-weight:700;color:var(--success)">${Currency.formatUSD(grand)}</div>
         </div>
-        <div class="subs-bulk-preview">${rows}</div>
-        ${skipped ? `<div class="subs-bulk-warn" style="margin-top:10px">ℹ️ ${skipped} ${App.t('bulk_pay_skipped')}</div>` : ''}`,
+        ${items.length ? `${nexts.length ? secTitle(`${App.t('bulk_pay_balances')} · ${Currency.formatUSD(owed)}`) : ''}<div class="subs-bulk-preview">${rows}</div>` : ''}
+        ${nexts.length ? `${secTitle(`📅 ${App.t('bulk_pay_next_months')} · ${Currency.formatUSD(nextSum)}`)}<div class="subs-bulk-preview">${nextRows}</div>` : ''}
+        ${skipped > 0 ? `<div class="subs-bulk-warn" style="margin-top:10px">ℹ️ ${skipped} ${App.t('bulk_pay_skipped')}</div>` : ''}`,
       onConfirm: async () => {
-        await _commitInChunks(items, (b, ref, x) => b.update(ref, { amountPaid: x.totalAmount || 0, paymentMethod: 'paid' }));
-        await Promise.all(items.map(x => logActivity(_db, 'payment_recorded', { subscriber: x.subscriberName, subscriberId: x.subscriberId, sport: x.sportName, amount: _rem(x) })));
-        if (typeof WaQueue !== 'undefined') items.forEach(x => WaQueue.onPayment(_db, { ...x, amountPaid: x.totalAmount || 0 }, _rem(x)));
-        Toast.success(`${App.t('payment_recorded')} · ${items.length} · ${Currency.formatUSD(owed)}`);
-        items.forEach(x => _selected.delete(x.id));
+        if (items.length) {
+          await _commitInChunks(items, (b, ref, x) => b.update(ref, { amountPaid: x.totalAmount || 0, paymentMethod: 'paid' }));
+          await Promise.all(items.map(x => logActivity(_db, 'payment_recorded', { subscriber: x.subscriberName, subscriberId: x.subscriberId, sport: x.sportName, amount: _rem(x) })));
+          if (typeof WaQueue !== 'undefined') items.forEach(x => WaQueue.onPayment(_db, { ...x, amountPaid: x.totalAmount || 0 }, _rem(x)));
+        }
+        if (nexts.length) {
+          // Re-check each one: it may have been paid / renewed meanwhile
+          const todo = nexts.filter(n => { const cur = _all.find(x => x.id === n.s.id); return cur && _canPayNext(cur); });
+          const created = [];
+          for (let i = 0; i < todo.length; i += 200) {          // 2 ops each → stay under 500
+            const batch = _db.batch();
+            todo.slice(i, i + 200).forEach(n => {
+              const s = n.s;
+              const coach = _coaches.find(c => c.id === s.coachId) || null;
+              const data = {
+                subscriberId: s.subscriberId, subscriberName: s.subscriberName || '',
+                sportId: n.sport.id, sportName: n.sport.name || s.sportName || '',
+                coachId: s.coachId || null,
+                coachName: coach ? coach.name : (s.coachName || null),
+                coachCommission: coach ? (coach.commission || 0) : (s.coachCommission || 0),
+                totalAmount: n.total, amountPaid: n.total, paymentMethod: 'paid',
+                startDate: n.startDate, endDate: n.endDate, months: n.months,
+                autoRenew: !!s.autoRenew,
+                renewedFromId: s.id,
+                notes: '',
+              };
+              const newRef = _db.collection(COL.SUBSCRIPTIONS).doc();
+              batch.set(newRef, { ...data, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+              batch.update(_db.collection(COL.SUBSCRIPTIONS).doc(s.id), { autoRenew: false, renewedToId: newRef.id });
+              created.push({ ...data, id: newRef.id });
+            });
+            await batch.commit();
+          }
+          await Promise.all(created.map(d => logActivity(_db, 'payment_recorded', { subscriber: d.subscriberName, subscriberId: d.subscriberId, sport: d.sportName, amount: d.totalAmount })));
+          if (typeof WaQueue !== 'undefined') created.forEach(d => WaQueue.onPayment(_db, d, d.totalAmount));
+        }
+        Toast.success(`${App.t('payment_recorded')} · ${items.length + nexts.length} · ${Currency.formatUSD(grand)}`);
+        all.forEach(x => _selected.delete(x.id));
         await loadData();
       },
     });

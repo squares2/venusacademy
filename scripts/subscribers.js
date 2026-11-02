@@ -397,6 +397,15 @@ const SubscribersModule = (() => {
               <div class="form-error-msg"></div>
             </div>
           </div>
+          <div class="form-row cols-1" id="sf-propagate-row" style="display:none">
+            <div class="form-group">
+              <label class="form-check" for="sf-propagate">
+                <input type="checkbox" id="sf-propagate">
+                <span class="form-check-label">🔄 ${t('propagate_sub_lbl')}</span>
+              </label>
+              <div class="text-muted" style="font-size:11px;margin-top:4px">${t('propagate_sub_hint')}</div>
+            </div>
+          </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">${t('gender')}</label>
@@ -547,6 +556,7 @@ const SubscribersModule = (() => {
     _editId = null;
     document.getElementById('sub-modal-title').textContent = App.t('add_subscriber');
     clearForm();
+    setPropagateField(false);
     Modal.open('modal-subscriber');
   }
 
@@ -556,7 +566,43 @@ const SubscribersModule = (() => {
     if (!sub) return;
     document.getElementById('sub-modal-title').textContent = App.t('edit') + ': ' + sub.name;
     fillForm(sub);
+    setPropagateField(true);
     Modal.open('modal-subscriber');
+  }
+
+  /* "Also update past subscriptions" checkbox — edit mode only, unchecked by default */
+  function setPropagateField(show) {
+    const row = document.getElementById('sf-propagate-row');
+    const cb  = document.getElementById('sf-propagate');
+    if (row) row.style.display = show ? '' : 'none';
+    if (cb)  cb.checked = false;
+  }
+
+  /* Copy the corrected name (and phone, where a record keeps one) into every
+     subscription of this subscriber. Subscriptions are matched by subscriberId;
+     old records saved without an id are matched by the previous name. */
+  async function propagateToSubscriptions(id, oldName, oldPhone, name, phone) {
+    const col = _db.collection(COL.SUBSCRIPTIONS);
+    const docs = new Map();
+    (await col.where('subscriberId', '==', id).get()).forEach(d => docs.set(d.id, d));
+    if (oldName) {
+      (await col.where('subscriberName', '==', oldName).get())
+        .forEach(d => { if (!d.data().subscriberId) docs.set(d.id, d); });
+    }
+    const updates = [];
+    docs.forEach(d => {
+      const x = d.data(), u = {};
+      if ((x.subscriberName || '') !== name) u.subscriberName = name;
+      if (!x.subscriberId) u.subscriberId = id;
+      if ('subscriberPhone' in x && x.subscriberPhone !== phone) u.subscriberPhone = phone;
+      if (Object.keys(u).length) updates.push([d.ref, u]);
+    });
+    for (let i = 0; i < updates.length; i += 450) {        // Firestore batch limit is 500
+      const batch = _db.batch();
+      updates.slice(i, i + 450).forEach(([ref, u]) => batch.update(ref, u));
+      await batch.commit();
+    }
+    return updates.length;
   }
 
   async function openProfile(id) {
@@ -666,8 +712,19 @@ const SubscribersModule = (() => {
 
     try {
       if (_editId) {
+        const prev = _all.find(s => s.id === _editId) || {};
+        const propagate = !!document.getElementById('sf-propagate')?.checked;
         await _db.collection(COL.SUBSCRIBERS).doc(_editId).update(data);
         await logActivity(_db, 'subscriber_updated', { name: data.name, id: _editId, subscriberId: _editId });
+        if (propagate) {
+          try {
+            const n = await propagateToSubscriptions(_editId, prev.name || '', prev.phone || '', data.name, data.phone);
+            if (n) Toast.success(App.t('propagate_sub_done').replace('{n}', n));
+          } catch (e) {
+            console.error('Propagate to subscriptions failed', e);
+            Toast.error(App.t('propagate_sub_failed'));
+          }
+        }
       } else {
         data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
         const ref = await _db.collection(COL.SUBSCRIBERS).add(data);
