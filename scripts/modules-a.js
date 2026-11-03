@@ -710,6 +710,8 @@ const SubscriptionsModule = (() => {
       : _canPayNext(s)
         ? `<button class="btn btn-success btn-sm" title="${App.t('pay_next_hint')}" onclick="SubscriptionsModule.payNext('${s.id}')">💰 ${App.t('pay_btn')}</button>`
         : '';
+    const waBtn = (s.subscriberId && typeof WaQueue !== 'undefined')
+      ? `<button class="btn btn-outline btn-sm btn-icon" title="${WaI18n.t('remind_btn')}" onclick="event.stopPropagation();SubscriptionsModule.remindWa('${s.id}')">💬</button>` : '';
     const latestTag = isLatest ? `<span class="subs-latest-tag">${App.t('latest_word')}</span>` : '';
     const sel = _selected.has(s.id);
     const trAttrs = (child
@@ -733,7 +735,7 @@ const SubscriptionsModule = (() => {
       <td class="dt-only">${Currency.formatUSD(s.totalAmount||0)}</td>
       <td class="dt-only" style="color:var(--success)">${Currency.formatUSD(s.amountPaid||0)}</td>
       <td class="dt-only" style="color:${remColor}">${Currency.formatUSD(remaining)}</td>
-      <td class="dt-only"><div class="flex gap-2">${payBtn}
+      <td class="dt-only"><div class="flex gap-2">${payBtn}${waBtn}
         ${freezeBtn(s, true)}
         <button class="btn btn-outline btn-sm btn-icon" onclick="SubscriptionsModule.openEdit('${s.id}')">✏️</button>
         <button class="btn btn-danger btn-sm btn-icon" onclick="SubscriptionsModule.del('${s.id}')">🗑</button>
@@ -753,7 +755,7 @@ const SubscriptionsModule = (() => {
             <div class="mobile-card-row"><span>${App.t('paid')}</span><span style="color:var(--success)">${Currency.formatUSD(s.amountPaid||0)}</span></div>
             <div class="mobile-card-row"><span>${App.t('remaining')}</span><span style="color:${remColor}">${Currency.formatUSD(remaining)}</span></div>
           </div>
-          <div class="mobile-card-actions">${payBtn}
+          <div class="mobile-card-actions">${payBtn}${waBtn}
             ${freezeBtn(s, false)}
             <button class="btn btn-outline btn-sm" onclick="SubscriptionsModule.openEdit('${s.id}')">✏️ ${App.t('edit')}</button>
             <button class="btn btn-danger btn-sm" onclick="SubscriptionsModule.del('${s.id}')">🗑 ${App.t('delete')}</button>
@@ -796,7 +798,8 @@ const SubscriptionsModule = (() => {
       <td class="dt-only">${Currency.formatUSD(total)}</td>
       <td class="dt-only" style="color:var(--success)">${Currency.formatUSD(paid)}</td>
       <td class="dt-only" style="color:${remColor}">${Currency.formatUSD(remaining)}${unpaidNote}</td>
-      <td class="dt-only"><div class="flex gap-2">${addBtn}
+      <td class="dt-only"><div class="flex gap-2">${addBtn}${(latest.subscriberId && typeof WaQueue !== 'undefined')
+          ? `<button class="btn btn-outline btn-sm btn-icon" title="${WaI18n.t('remind_btn')}" onclick="event.stopPropagation();SubscriptionsModule.remindWa('${latest.id}',true)">💬</button>` : ''}
         <button class="btn btn-ghost btn-sm subs-expand-btn" onclick="event.stopPropagation();SubscriptionsModule.toggleGroup('${gid}')">${App.t(expanded?'hide_word':'show_word')}</button>
       </div></td>
       <td class="mob-only" colspan="11" style="padding:6px 0;border:none">
@@ -1647,6 +1650,25 @@ const SubscriptionsModule = (() => {
     } catch (e) { console.error(e); Toast.error(App.t('error_generic')); }
   }
 
+  // 💬 beside Pay → queue an expiry reminder (days left / expired + amount owed) in WhatsApp Sender.
+  // group=true → status from the subscriber's latest subscription, balance summed over all unpaid ones.
+  async function remindWa(id, group = false) {
+    const s = _all.find(x => x.id === id); if (!s) return;
+    const items = group
+      ? _all.filter(x => _subKey(x) === _subKey(s) && (x.totalAmount||0) - (x.amountPaid||0) > 0)
+      : [s];
+    if (!items.length) items.push(s); // fully paid → renewal invite instead of amount owed
+    const phone = _subscribers.find(x => x.id === s.subscriberId)?.phone;
+    if (!phone || typeof WaQueue === 'undefined') return Toast.warning(App.t('no_phone_number'));
+    try {
+      const r = await WaQueue.queueReminder(_db, { sub: s, items, phone });
+      if (r === 'no_phone') return Toast.warning(App.t('no_phone_number'));
+      const name = s.subscriberName || '';
+      const open = `<a href="#" style="color:inherit;text-decoration:underline;margin-inline-start:6px" onclick="event.preventDefault();App.navigate('whatsapp')">${App.t('remind_open_sender')}</a>`;
+      Toast.show(`${App.t(r === 'updated' ? 'remind_queue_updated' : 'remind_queued').replace('{name}', name)}${open}`, 'success', 6000);
+    } catch (e) { console.error(e); Toast.error(App.t('error_generic')); }
+  }
+
   function debtSettle(k) {
     const d = _debt.get(decodeURIComponent(k)); if (!d) return;
     const items = d.items.slice();
@@ -2103,7 +2125,7 @@ const SubscriptionsModule = (() => {
   return {render,openNew,openEdit,save,resetEndDate,payRemaining,payNext,del,
            toggleSelect,selectGroup,selectPage,clearSelection,bulkStartDate,bulkCoach,bulkMonthly,bulkDelete,bulkPay,
            openFreeze,openUnfreeze,bulkFreeze,bulkUnfreeze,
-           toggleDebtPanel,refreshDebtPanel:()=>renderDebtPanel(),debtToggleAll,debtFilter,debtView,debtRemind,debtSettle,onSearch,onFilter,onDateFilter,goPage,toggleGroup,toggleAllGroups,processAutoRenewals,
+           toggleDebtPanel,refreshDebtPanel:()=>renderDebtPanel(),debtToggleAll,debtFilter,debtView,debtRemind,remindWa,debtSettle,onSearch,onFilter,onDateFilter,goPage,toggleGroup,toggleAllGroups,processAutoRenewals,
            onSubscriberSearch,selectSubscriber,hideSubscriberDropdown,
            showSearchSuggestions,hideSearchSuggestions,selectSearchTerm};
 })();

@@ -12,11 +12,16 @@
 const WaI18n = (() => {
   const EN = {
     title: 'WhatsApp Sender', subtitle: 'Automatic reminders sent through your WhatsApp Web',
-    type_expiring: 'Expiring soon', type_unpaid: 'Unpaid balance', type_renewal: 'Renewal', type_payment: 'Payment received',
+    type_expiring: 'Expiring soon', type_unpaid: 'Unpaid balance', type_renewal: 'Renewal', type_payment: 'Payment received', type_reminder: 'Expiry reminder',
     desc_expiring: 'Sent once to each subscription that enters the "Expiring Soon" window.',
     desc_unpaid: 'One message per subscriber listing everything they still owe (repeats every N days while unpaid).',
     desc_renewal: 'Sent when a subscription is renewed automatically.',
     desc_payment: 'Sent whenever a payment is recorded — tells the member what was paid and what remains.',
+    desc_reminder: 'Queued only when you press 💬 beside Pay — tells the member how many days are left, or that the subscription has expired, plus what they owe (or a renewal invite if fully paid).',
+    s_expires_line: 'Line before expiry', s_today_line: 'Line when it expires today', s_expired_line: 'Line after expiry', s_owed_line: 'Line when money is owed', s_paidup_line: 'Line when fully paid',
+    ph_balance_line: 'amount owed / paid-up line',
+    ph_days_ago: 'days since expiry', ph_status_line: 'expiry status line',
+    remind_btn: 'Send a WhatsApp expiry reminder (days left / expired)', s_manual_only: 'Manual',
     st_pending: 'Pending', st_sending: 'Sending', st_sent: 'Sent', st_failed: 'Failed', st_skipped: 'Skipped',
     ext_ok: 'Extension connected', ext_missing: 'Extension not detected', wa_tab_open: 'WhatsApp Web tab open', wa_tab_closed: 'WhatsApp Web tab will open automatically',
     sent_today: 'Sent today', pending_count: 'Waiting',
@@ -60,11 +65,16 @@ const WaI18n = (() => {
   };
   const AR = {
     title: 'مرسل واتساب', subtitle: 'تذكيرات تلقائية تُرسل عبر واتساب ويب الخاص بك',
-    type_expiring: 'ينتهي قريباً', type_unpaid: 'رصيد غير مدفوع', type_renewal: 'تجديد', type_payment: 'استلام دفعة',
+    type_expiring: 'ينتهي قريباً', type_unpaid: 'رصيد غير مدفوع', type_renewal: 'تجديد', type_payment: 'استلام دفعة', type_reminder: 'تذكير بالانتهاء',
     desc_expiring: 'تُرسل مرة واحدة لكل اشتراك يدخل فترة «ينتهي قريباً».',
     desc_unpaid: 'رسالة واحدة لكل مشترك بكل المبالغ المستحقة عليه (تتكرر كل N يوم طالما لم يُدفع).',
     desc_renewal: 'تُرسل عند تجديد الاشتراك تلقائياً.',
     desc_payment: 'تُرسل عند تسجيل أي دفعة — تُعلم المشترك بما دفعه وما تبقى عليه.',
+    desc_reminder: 'تُضاف فقط عند الضغط على 💬 بجانب زر الدفع — تُعلم المشترك بعدد الأيام المتبقية أو بانتهاء اشتراكه، مع المبلغ المستحق (أو دعوة للتجديد إذا كان مسدداً).',
+    s_expires_line: 'السطر قبل الانتهاء', s_today_line: 'السطر عند الانتهاء اليوم', s_expired_line: 'السطر بعد الانتهاء', s_owed_line: 'السطر عند وجود مبلغ مستحق', s_paidup_line: 'السطر عند التسديد الكامل',
+    ph_balance_line: 'سطر المبلغ المستحق / المسدد',
+    ph_days_ago: 'أيام منذ الانتهاء', ph_status_line: 'سطر حالة الانتهاء',
+    remind_btn: 'إرسال تذكير واتساب بالانتهاء (الأيام المتبقية / منتهٍ)', s_manual_only: 'يدوي',
     st_pending: 'بالانتظار', st_sending: 'جارٍ الإرسال', st_sent: 'تم الإرسال', st_failed: 'فشل', st_skipped: 'تم التخطي',
     ext_ok: 'الإضافة متصلة', ext_missing: 'الإضافة غير موجودة', wa_tab_open: 'تبويب واتساب ويب مفتوح', wa_tab_closed: 'سيُفتح تبويب واتساب ويب تلقائياً',
     sent_today: 'أُرسل اليوم', pending_count: 'بالانتظار',
@@ -111,12 +121,13 @@ const WaI18n = (() => {
 /* ═══════════════════════════════════════════════════ */
 const WaQueue = (() => {
   const COL_Q = 'wa_queue';
-  const TYPES = ['expiring', 'unpaid', 'renewal', 'payment'];
+  const TYPES = ['expiring', 'unpaid', 'renewal', 'payment', 'reminder'];
   const PLACEHOLDERS = {
     expiring: ['name', 'sport', 'start', 'end', 'days_left', 'months', 'amount', 'gym'],
     unpaid:   ['name', 'count', 'total_owed', 'list', 'gym'],
     renewal:  ['name', 'sport', 'months', 'start', 'end', 'amount', 'gym'],
     payment:  ['name', 'sport', 'months', 'start', 'end', 'paid_now', 'paid_total', 'total', 'remaining', 'remaining_line', 'gym'],
+    reminder: ['name', 'sport', 'start', 'end', 'days_left', 'days_ago', 'status_line', 'balance_line', 'total', 'paid_total', 'remaining', 'gym'],
   };
   const DEFAULTS = {
     sender: { dailyLimit: 40, minDelay: 30, maxDelay: 90, unpaidEveryDays: 7, autoScan: true },
@@ -126,6 +137,9 @@ const WaQueue = (() => {
       renewal:  { active: true,  template: 'مرحباً {name} 🎉\nتم تجديد اشتراكك في {sport} لمدة {months} شهر، من {start} إلى {end}.\nقيمة الاشتراك: {amount}. نتمنى لك تمريناً موفقاً 💪' },
       payment:  { active: true,  template: 'مرحباً {name} ✅\nتم استلام دفعة بقيمة {paid_now} عن اشتراك {sport} ({months} شهر: {start} ← {end}).\n{remaining_line}\nشكراً لك — {gym}',
                   remainingLine: 'المبلغ المتبقي للدفع لاحقاً: {remaining}', paidInFullLine: 'تم تسديد الاشتراك بالكامل ✓' },
+      reminder: { active: true,  template: 'مرحباً {name} 👋\nتذكير من {gym} بخصوص اشتراكك في {sport}:\n{status_line}\n{balance_line}',
+                  expiresLine: 'سينتهي اشتراكك بعد {days_left} يوم بتاريخ {end}.', todayLine: 'ينتهي اشتراكك اليوم {end}.', expiredLine: 'انتهى اشتراكك بتاريخ {end} (منذ {days_ago} يوم).',
+                  owedLine: 'المبلغ المستحق: {remaining}.\nنرجو التسديد في أقرب وقت، شكراً لك 🙏', paidLine: 'للتجديد يسعدنا استقبالك في {gym} 💪' },
     },
   };
 
@@ -255,6 +269,46 @@ const WaQueue = (() => {
     return 'added';
   }
 
+  /* ── Manual expiry reminder (💬 beside Pay in Subscriptions) ──
+     `sub` decides the status line (days left / expires today / expired),
+     `items` are the unpaid subscriptions whose balances are summed.
+     Always available (manual), whatever the type's switch says. A reminder
+     for this subscriber still waiting in the queue is refreshed instead of
+     adding a duplicate. Returns 'added' | 'updated' | 'no_phone'. */
+  async function queueReminder(db, { sub, items, phone }) {
+    if (!sub) return null;
+    const s = await getSettings(db);
+    const cfg = s.types.reminder;
+    const num = normalizePhone(phone || await phoneOf(db, sub.subscriberId));
+    if (!num) return 'no_phone';
+    const list = (items && items.length ? items : [sub]);
+    const total = list.reduce((t, x) => t + (Number(x.totalAmount) || 0), 0);
+    const paid  = list.reduce((t, x) => t + (Number(x.amountPaid) || 0), 0);
+    const left = sub.endDate ? DateUtil.diffDays(sub.endDate) : 0;
+    const vars = {
+      gym: s.gymName, name: sub.subscriberName || '', sport: sub.sportName || '',
+      start: fmtD(sub.startDate), end: fmtD(sub.endDate),
+      days_left: Math.max(0, left), days_ago: Math.max(0, -left),
+      total: fmt$(total), paid_total: fmt$(paid), remaining: fmt$(Math.max(0, total - paid)),
+    };
+    vars.status_line = render(left > 0 ? cfg.expiresLine : left === 0 ? cfg.todayLine : cfg.expiredLine, vars);
+    vars.balance_line = render(total - paid > 0 ? cfg.owedLine : cfg.paidLine, vars);
+    const text = render(cfg.template, vars);
+
+    const pend = await db.collection(COL_Q).where('subscriberId', '==', sub.subscriberId || null).where('status', '==', 'pending').get();
+    const old = pend.docs.find(d => d.data().type === 'reminder');
+    if (old) { await old.ref.update({ text, phone: num, name: vars.name }); return 'updated'; }
+
+    const key = `reminder_${sub.subscriberId || sub.id}_${Date.now()}`;
+    await db.collection(COL_Q).doc(safeId(key)).set({
+      type: 'reminder', key, subscriberId: sub.subscriberId || null, name: vars.name, phone: num, text, manual: true,
+      sports: [...new Set(list.map(x => x.sportName).filter(Boolean))],
+      status: 'pending', error: null,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(), createdDate: DateUtil.today(),
+    });
+    return 'added';
+  }
+
   /* ── Daily scan: expiring + unpaid ─────────────────── */
   let _scanning = null;
   function autoScan(db) {
@@ -337,7 +391,7 @@ const WaQueue = (() => {
   }
 
   return { COL_Q, TYPES, PLACEHOLDERS, DEFAULTS, getSettings, invalidate, render, normalizePhone,
-           enqueue, onPayment, onRenewal, queueUnpaid, scan, autoScan, nextPending, countSentToday, mark, recoverInterrupted };
+           enqueue, onPayment, onRenewal, queueUnpaid, queueReminder, scan, autoScan, nextPending, countSentToday, mark, recoverInterrupted };
 })();
 
 /* ═══════════════════════════════════════════════════ */
@@ -450,7 +504,7 @@ const WaPage = (() => {
   const L = WaI18n.t;
   let _sel = new Set();
   let _db, _items = [], _tab = 'pending', _unsubSnap = null, _unsubSender = null, _tick = null, _waTab = false, _sentToday = 0, _limit = 40;
-  const TYPE_ICON = { expiring: '⏳', unpaid: '💸', renewal: '🔁', payment: '✅' };
+  const TYPE_ICON = { expiring: '⏳', unpaid: '💸', renewal: '🔁', payment: '✅', reminder: '⏰' };
 
   /* ── Filters (subscriber / sport / type / date) ───────
      Kept while the app is open. When any filter is on, Start sends
@@ -874,7 +928,7 @@ const WaSettings = (() => {
   const SAMPLE = {
     name: 'أحمد', sport: 'Calisthenics', start: '1 Oct 2026', end: '1 Nov 2026', days_left: 5, months: 1, amount: '$35.00',
     count: 2, total_owed: '$70.00', list: '• Calisthenics — 1 Sep 2026: $35.00\n• Calisthenics — 1 Oct 2026: $35.00',
-    paid_now: '$20.00', paid_total: '$20.00', total: '$35.00', remaining: '$15.00',
+    paid_now: '$20.00', paid_total: '$20.00', total: '$35.00', remaining: '$15.00', days_ago: 3,
   };
 
   async function render(container, db) {
@@ -907,11 +961,18 @@ const WaSettings = (() => {
       <div class="wa-set-grid two">
         <div class="form-group"><label class="form-label">${L('s_remaining_line')}</label><input class="form-input" dir="auto" id="wat-${k}-rem" value="${(c.remainingLine || '').replace(/"/g, '&quot;')}" oninput="WaSettings.preview('${k}')" onfocus="WaSettings.focus(this)"></div>
         <div class="form-group"><label class="form-label">${L('s_paid_line')}</label><input class="form-input" dir="auto" id="wat-${k}-full" value="${(c.paidInFullLine || '').replace(/"/g, '&quot;')}" oninput="WaSettings.preview('${k}')" onfocus="WaSettings.focus(this)"></div>
+      </div>` : k === 'reminder' ? `
+      <div class="wa-set-grid">
+        ${[['exp', 'expiresLine', 's_expires_line'], ['today', 'todayLine', 's_today_line'], ['ago', 'expiredLine', 's_expired_line'], ['owed', 'owedLine', 's_owed_line'], ['paid', 'paidLine', 's_paidup_line']].map(([id, f, lbl]) =>
+          `<div class="form-group"><label class="form-label">${L(lbl)}</label><input class="form-input" dir="auto" id="wat-${k}-${id}" value="${(c[f] || '').replace(/"/g, '&quot;')}" oninput="WaSettings.preview('${k}')" onfocus="WaSettings.focus(this)"></div>`).join('')}
       </div>` : '';
+    const sw = k === 'reminder'
+      ? `<input type="checkbox" id="wat-${k}-on" checked hidden><span class="wa-type-state">${L('s_manual_only')}</span>`
+      : `<label class="wa-switch"><input type="checkbox" id="wat-${k}-on" ${c.active ? 'checked' : ''} onchange="WaSettings.sync('${k}')"><span></span></label>`;
     return `
       <div class="wa-type-card" id="wat-card-${k}">
         <div class="wa-type-head">
-          <label class="wa-switch"><input type="checkbox" id="wat-${k}-on" ${c.active ? 'checked' : ''} onchange="WaSettings.sync('${k}')"><span></span></label>
+          ${sw}
           <div>
             <div class="wa-type-title">${L('type_' + k)} <span class="wa-type-state" id="wat-${k}-state"></span></div>
             <div class="wa-type-desc">${L('desc_' + k)}</div>
@@ -943,6 +1004,8 @@ const WaSettings = (() => {
     if (!ta || !out) return;
     const vars = { ...SAMPLE, gym: _s.gymName };
     if (k === 'payment') vars.remaining_line = WaQueue.render(document.getElementById(`wat-${k}-rem`).value, vars);
+    if (k === 'reminder') { vars.status_line = WaQueue.render(document.getElementById(`wat-${k}-exp`).value, vars);
+      vars.balance_line = WaQueue.render(document.getElementById(`wat-${k}-owed`).value, vars); }
     const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
     out.innerHTML = esc(WaQueue.render(ta.value, vars)).replace(/\n/g, '<br>');
   }
@@ -959,6 +1022,7 @@ const WaSettings = (() => {
     const d = WaQueue.DEFAULTS.types[k];
     document.getElementById(`wat-${k}-tpl`).value = d.template;
     if (k === 'payment') { document.getElementById(`wat-${k}-rem`).value = d.remainingLine; document.getElementById(`wat-${k}-full`).value = d.paidInFullLine; }
+    if (k === 'reminder') { document.getElementById(`wat-${k}-exp`).value = d.expiresLine; document.getElementById(`wat-${k}-today`).value = d.todayLine; document.getElementById(`wat-${k}-ago`).value = d.expiredLine; document.getElementById(`wat-${k}-owed`).value = d.owedLine; document.getElementById(`wat-${k}-paid`).value = d.paidLine; }
     preview(k);
   }
 
@@ -971,6 +1035,7 @@ const WaSettings = (() => {
     };
     WaQueue.TYPES.forEach(k => {
       waSettings.types[k] = { active: !!document.getElementById(`wat-${k}-on`)?.checked, template: document.getElementById(`wat-${k}-tpl`)?.value || '' };
+      if (k === 'reminder') Object.assign(waSettings.types[k], { active: true, expiresLine: document.getElementById(`wat-${k}-exp`).value, todayLine: document.getElementById(`wat-${k}-today`).value, expiredLine: document.getElementById(`wat-${k}-ago`).value, owedLine: document.getElementById(`wat-${k}-owed`).value, paidLine: document.getElementById(`wat-${k}-paid`).value });
       if (k === 'payment') { waSettings.types[k].remainingLine = document.getElementById(`wat-${k}-rem`).value; waSettings.types[k].paidInFullLine = document.getElementById(`wat-${k}-full`).value; }
     });
     try {
