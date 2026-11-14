@@ -1498,3 +1498,11 @@ body.lang-ar .wa-switch input:checked + span::after { transform: translateX(-20p
   .pv-add, .pv-out { flex: 1; text-align: center; justify-content: center; }
   .pos-card-zoom { opacity: 1; transform: none; }
 }
+
+/* ═══ Closed subscription (renewed + fully paid) ═══
+   Shown greyed out like an inactive record: no action is needed on it.
+   Hover brings it back to full strength so edit / delete stay easy to use. */
+.badge-closed { background: rgba(148,148,160,.12); color: var(--text-secondary); border: 1px solid rgba(148,148,160,.28); white-space: nowrap; }
+tr.is-closed > td { filter: grayscale(1); opacity: .55; transition: opacity .15s ease, filter .15s ease; }
+tr.is-closed:hover > td, tr.is-closed.is-selected > td { opacity: .9; }
+tr.is-closed .subs-latest-tag { display: none; }

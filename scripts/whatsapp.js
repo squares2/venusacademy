@@ -35,7 +35,7 @@ const WaI18n = (() => {
     scan_done: 'new message(s) added to the queue', scan_none: 'Nothing new to add',
     edit: 'Edit', skip: 'Skip', retry: 'Retry', del: 'Delete', manual: 'Send manually', mark_sent: 'Mark as sent',
     edit_title: 'Edit message', save: 'Save', cancel: 'Cancel', empty: 'Nothing here.',
-    err_no_phone: 'No phone number', err_invalid_number: 'Not on WhatsApp / invalid number', err_timeout: 'Timed out',
+    err_no_phone: 'No phone number', err_already_paid: 'Skipped — already paid', err_already_renewed: 'Skipped — already renewed', err_invalid_number: 'Not on WhatsApp / invalid number', err_timeout: 'Timed out',
     err_interrupted: 'Interrupted (app closed while sending)', err_no_extension: 'Extension not reachable', err_send_click_failed: 'Could not press Send',
     install_title: 'Install the WhatsApp Sender extension (one time)',
     install_1: 'Unzip <b>Venus_WA_Extension.zip</b> on the reception computer.',
@@ -88,7 +88,7 @@ const WaI18n = (() => {
     scan_done: 'رسالة/رسائل جديدة أُضيفت إلى القائمة', scan_none: 'لا يوجد جديد',
     edit: 'تعديل', skip: 'تخطي', retry: 'إعادة المحاولة', del: 'حذف', manual: 'إرسال يدوي', mark_sent: 'تعليم كمُرسل',
     edit_title: 'تعديل الرسالة', save: 'حفظ', cancel: 'إلغاء', empty: 'لا يوجد شيء هنا.',
-    err_no_phone: 'لا يوجد رقم هاتف', err_invalid_number: 'الرقم غير موجود على واتساب / غير صالح', err_timeout: 'انتهت المهلة',
+    err_no_phone: 'لا يوجد رقم هاتف', err_already_paid: 'تم التخطي — مدفوع مسبقاً', err_already_renewed: 'تم التخطي — مجدَّد مسبقاً', err_invalid_number: 'الرقم غير موجود على واتساب / غير صالح', err_timeout: 'انتهت المهلة',
     err_interrupted: 'توقف (أُغلق التطبيق أثناء الإرسال)', err_no_extension: 'تعذّر الوصول إلى الإضافة', err_send_click_failed: 'تعذّر الضغط على إرسال',
     install_title: 'تثبيت إضافة مرسل واتساب (مرة واحدة)',
     install_1: 'فك ضغط <b>Venus_WA_Extension.zip</b> على كمبيوتر الاستقبال.',
@@ -301,7 +301,7 @@ const WaQueue = (() => {
 
     const key = `reminder_${sub.subscriberId || sub.id}_${Date.now()}`;
     await db.collection(COL_Q).doc(safeId(key)).set({
-      type: 'reminder', key, subscriberId: sub.subscriberId || null, name: vars.name, phone: num, text, manual: true,
+      type: 'reminder', key, subscriberId: sub.subscriberId || null, subId: sub.id || null, name: vars.name, phone: num, text, manual: true,
       sports: [...new Set(list.map(x => x.sportName).filter(Boolean))],
       status: 'pending', error: null,
       createdAt: firebase.firestore.FieldValue.serverTimestamp(), createdDate: DateUtil.today(),
@@ -373,6 +373,49 @@ const WaQueue = (() => {
     return _scanning;
   }
 
+  /* ── Last check right before sending ──────────────────
+     A message may have waited in the queue for days. If the member paid
+     or renewed in the meantime it must not go out:
+       • expiring  → skipped once that subscription is renewed (or frozen / deleted)
+       • unpaid    → skipped when nothing is owed any more; if only part was
+                     paid, the text is rebuilt with today's amounts
+       • reminder  → skipped when its subscription was renewed and nothing is owed
+     payment / renewal confirmations always go out.
+     Returns { send: true, text? } or { send: false, reason }. On a read error
+     the message is sent as queued (weak connection must not block the queue). */
+  async function recheck(db, item) {
+    if (!['expiring', 'unpaid', 'reminder'].includes(item.type) || !item.subscriberId) return { send: true };
+    try {
+      const snap = await db.collection(COL.SUBSCRIPTIONS).where('subscriberId', '==', item.subscriberId).get();
+      const subs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const renewed = SubLife.supersededIds(subs);
+      const owed = subs.filter(x => SubLife.balance(x) > 0)
+        .sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
+
+      if (item.type === 'expiring') {
+        const m = /^expiring_(.+)_(\d{4}-\d{2}-\d{2})$/.exec(item.key || '');
+        const sub = m && subs.find(x => x.id === m[1]);
+        if (!sub || sub.frozen || renewed.has(sub.id) || (sub.endDate || '') !== m[2]) return { send: false, reason: 'already_renewed' };
+        return { send: true };
+      }
+      if (item.type === 'reminder') {
+        const sub = item.subId && subs.find(x => x.id === item.subId);
+        if (sub && renewed.has(sub.id) && !owed.length) return { send: false, reason: 'already_renewed' };
+        return { send: true };
+      }
+      // unpaid
+      if (!owed.length) return { send: false, reason: 'already_paid' };
+      const s = await getSettings(db);
+      const total = owed.reduce((t, x) => t + SubLife.balance(x), 0);
+      const list = owed.map(x => `• ${x.sportName || ''} — ${fmtD(x.startDate)}: ${fmt$(SubLife.balance(x))}`).join('\n');
+      const text = render(s.types.unpaid.template, { gym: s.gymName, name: item.name || '', count: owed.length, total_owed: fmt$(total), list });
+      return { send: true, text };
+    } catch (e) {
+      console.warn('WA pre-send check failed — sending as queued', e);
+      return { send: true };
+    }
+  }
+
   /* ── Queue helpers for the sender/page ─────────────── */
   async function nextPending(db) {
     const snap = await db.collection(COL_Q).where('status', '==', 'pending').limit(100).get();
@@ -391,7 +434,7 @@ const WaQueue = (() => {
   }
 
   return { COL_Q, TYPES, PLACEHOLDERS, DEFAULTS, getSettings, invalidate, render, normalizePhone,
-           enqueue, onPayment, onRenewal, queueUnpaid, queueReminder, scan, autoScan, nextPending, countSentToday, mark, recoverInterrupted };
+           enqueue, onPayment, onRenewal, queueUnpaid, queueReminder, scan, autoScan, recheck, nextPending, countSentToday, mark, recoverInterrupted };
 })();
 
 /* ═══════════════════════════════════════════════════ */
@@ -463,6 +506,12 @@ const WaSender = (() => {
         if (budget <= 0) { _paused = 'limit'; break; }
         const item = only ? await nextFromIds() : await WaQueue.nextPending(db);
         if (!item) { if (_sentRun || _failedRun) Toast.success(L('done_all')); break; }
+        const chk = await WaQueue.recheck(db, item);
+        if (!chk.send) { // paid / renewed while waiting → never send, no delay needed
+          await WaQueue.mark(db, item.id, { status: 'skipped', error: chk.reason });
+          continue;
+        }
+        if (chk.text && chk.text !== item.text) { item.text = chk.text; await WaQueue.mark(db, item.id, { text: chk.text }); }
         _current = item; emit();
         await WaQueue.mark(db, item.id, { status: 'sending' });
         const r = await sendOne(item);

@@ -783,8 +783,10 @@ const ReportsModule = (() => {
 
       const revenue = periodSubs.reduce((t,s)=>t+(s.amountPaid||0),0);
       const salesRev = periodSales.reduce((t,s)=>t+(s.totalUsd||0),0);
-      const active = subs.filter(s=>!s.frozen&&!DateUtil.isExpired(s.endDate)).length;
-      const expiring = subs.filter(s=>!s.frozen&&DateUtil.isExpiringSoon(s.endDate)).length;
+      const renewedIds = SubLife.supersededIds(subs); // older periods that already have a follow-up
+      const live = s => !s.frozen && !renewedIds.has(s.id);
+      const active = subs.filter(s=>live(s)&&!DateUtil.isExpired(s.endDate)).length;
+      const expiring = subs.filter(s=>live(s)&&DateUtil.isExpiringSoon(s.endDate)).length;
       const coaches = coSnap.size;
 
       // Courses financials
@@ -891,10 +893,10 @@ const ReportsModule = (() => {
           <div class="chart-card-header">
             <div><div class="chart-title">${App.t('subscription_status_title')}</div></div>
           </div>
-          ${['active','expiring','expired','frozen'].map(st=>{
-            const count=subs.filter(s=>{if(st==='frozen')return !!s.frozen;if(s.frozen)return false;if(st==='active')return !DateUtil.isExpired(s.endDate)&&!DateUtil.isExpiringSoon(s.endDate);if(st==='expiring')return DateUtil.isExpiringSoon(s.endDate);return DateUtil.isExpired(s.endDate);}).length;
-            const colors={active:'var(--success)',expiring:'var(--warning)',expired:'var(--danger)',frozen:'#60a5fa'};
-            const labels={active:App.t('active'),expiring:App.t('expiring_soon'),expired:App.t('expired'),frozen:'❄ '+App.t('frozen_word')};
+          ${['active','expiring','expired','renewed','frozen'].map(st=>{
+            const count=subs.filter(s=>{if(st==='frozen')return !!s.frozen;if(s.frozen)return false;if(st==='renewed')return renewedIds.has(s.id);if(renewedIds.has(s.id))return false;if(st==='active')return !DateUtil.isExpired(s.endDate)&&!DateUtil.isExpiringSoon(s.endDate);if(st==='expiring')return DateUtil.isExpiringSoon(s.endDate);return DateUtil.isExpired(s.endDate);}).length;
+            const colors={active:'var(--success)',expiring:'var(--warning)',expired:'var(--danger)',renewed:'var(--text-muted)',frozen:'#60a5fa'};
+            const labels={active:App.t('active'),expiring:App.t('expiring_soon'),expired:App.t('expired'),renewed:'↻ '+App.t('renewed_badge'),frozen:'❄ '+App.t('frozen_word')};
             return `<div class="rev-bar-row"><span class="rev-bar-label" style="color:${colors[st]}">${labels[st]}</span><div class="rev-bar-track"><div class="rev-bar-fill" style="width:${subs.length?Math.round(count/subs.length*100):0}%;background:${colors[st]}"></div></div><span class="rev-bar-value" style="color:${colors[st]}">${count}</span></div>`;
           }).join('')}
         </div>
@@ -1562,8 +1564,9 @@ const DashboardModule = (() => {
       ]);
 
       const subs = subScSnap.docs.map(d=>({id:d.id,...d.data()}));
-      const active = subs.filter(s=>!s.frozen&&!DateUtil.isExpired(s.endDate)).length;
-      const expiring = subs.filter(s=>!s.frozen&&DateUtil.isExpiringSoon(s.endDate));
+      const renewedIds = SubLife.supersededIds(subs); // already renewed → nothing to chase
+      const active = subs.filter(s=>!s.frozen&&!renewedIds.has(s.id)&&!DateUtil.isExpired(s.endDate)).length;
+      const expiring = subs.filter(s=>!s.frozen&&!renewedIds.has(s.id)&&DateUtil.isExpiringSoon(s.endDate));
       const revenue = subs.reduce((t,s)=>t+(s.amountPaid||0),0);
 
       document.getElementById('dash-kpis').innerHTML = [

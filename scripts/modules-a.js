@@ -478,6 +478,7 @@ const SubscriptionsModule = (() => {
           <option value="expiring">${t('expiring_soon')}</option>
           <option value="partial">${t('partial')}</option>
           <option value="unpaid">${t('unpaid')}</option>
+          <option value="renewed">✓ ${t('renewed_closed')}</option>
           <option value="frozen">❄ ${t('frozen_word')}</option>
           <option value="multi_debt">⚠ ${t('owes_multi_filter')}</option>
         </select>
@@ -648,7 +649,7 @@ const SubscriptionsModule = (() => {
   async function loadData() {
     const snap = await _db.collection(COL.SUBSCRIPTIONS).orderBy('startDate','desc').get();
     _all = snap.docs.map(d=>({id:d.id,...d.data()}));
-    _all.forEach(_computeStatus); // frozen overrides dates: not active, not expiring, no renewal
+    _refreshStatuses(); // frozen overrides dates; a renewed + paid period is closed (never "expiring")
     const ids = new Set(_all.map(x=>x.id));
     _selected.forEach(id => { if (!ids.has(id)) _selected.delete(id); });
     buildDebtMap();
@@ -664,6 +665,7 @@ const SubscriptionsModule = (() => {
     const sp = document.getElementById('subs-filter-sport')?.value || '';
     const co = document.getElementById('subs-filter-coach')?.value || '';
     const [dFrom, dTo] = getDateRange();
+    _refreshStatuses();
     return _all.filter(s => {
       if (dFrom && (s.startDate||'') < dFrom) return false;
       if (dTo && (s.startDate||'') > dTo) return false;
@@ -688,9 +690,11 @@ const SubscriptionsModule = (() => {
       expiring:`<span class="badge badge-warning">● ${App.t('expiring_soon')}</span>`,
       partial:`<span class="badge badge-info">⊘ ${App.t('partial')}</span>`,
       unpaid:`<span class="badge badge-expired">✕ ${App.t('unpaid')}</span>`,
+      renewed:`<span class="badge badge-closed" title="${App.t('renewed_closed_hint')}">✓ ${App.t('renewed_closed')}</span>`,
       frozen:`<span class="badge badge-frozen" title="${App.t('frozen_since')} ${DateUtil.format(s.frozenAt)}">❄ ${App.t('frozen_word')} · ${_frozenDays(s)} ${App.t('days_word')}</span>`
     }[s._status]||'';
-    const renewBadge = s.autoRenew
+    const renewBadge = s._status === 'renewed' ? '' // the status badge already says it
+      : s.autoRenew
       ? `<span class="badge badge-gold${s.frozen?' is-paused':''}" title="${App.t(s.frozen?'auto_renew_paused_hint':'auto_renew_hint')}">🔁 ${App.t('auto_renew_badge')}${s.frozen?' ⏸':''}</span>`
       : s.renewedToId
         ? `<span class="badge" style="background:var(--bg-hover);color:var(--text-secondary)">↻ ${App.t('renewed_badge')}</span>`
@@ -714,9 +718,10 @@ const SubscriptionsModule = (() => {
       ? `<button class="btn btn-outline btn-sm btn-icon" title="${WaI18n.t('remind_btn')}" onclick="event.stopPropagation();SubscriptionsModule.remindWa('${s.id}')">💬</button>` : '';
     const latestTag = isLatest ? `<span class="subs-latest-tag">${App.t('latest_word')}</span>` : '';
     const sel = _selected.has(s.id);
+    const closed = s._status === 'renewed' ? ' is-closed' : '';
     const trAttrs = (child
-      ? `class="subs-child-row${expanded?'':' is-collapsed'}${sel?' is-selected':''}" data-gid="${gid}"`
-      : `class="${sel?'is-selected':''}"`) + ` data-sid="${s.id}"` + (s.frozen ? ' data-frozen="1"' : '');
+      ? `class="subs-child-row${expanded?'':' is-collapsed'}${sel?' is-selected':''}${closed}" data-gid="${gid}"`
+      : `class="${sel?'is-selected':''}${closed}"`) + ` data-sid="${s.id}"` + (s.frozen ? ' data-frozen="1"' : '');
     const cb = `<input type="checkbox" class="subs-cb" data-id="${s.id}" ${sel?'checked':''} onclick="event.stopPropagation()" onchange="SubscriptionsModule.toggleSelect('${s.id}',this.checked)">`;
     const numCell = child
       ? `<span class="subs-child-idx">${idx}</span>`
@@ -1244,8 +1249,16 @@ const SubscriptionsModule = (() => {
     const b=document.getElementById('subf-save-btn');
     if(b){ b.disabled=false; b.classList.remove('ng-busy'); b.removeAttribute('aria-busy'); }
   }
+  let _superseded = new Set(); // ids with a newer period (see SubLife)
+  function _refreshStatuses(){
+    _superseded = SubLife.supersededIds(_all);
+    _all.forEach(_computeStatus);
+  }
   function _computeStatus(s){
+    const bal = SubLife.balance(s);
     if(s.frozen) s._status='frozen';
+    // Renewed already → the old period is closed. Paid = grey "Renewed", still owing = keep chasing the money.
+    else if(_superseded.has(s.id)) s._status = bal<=0 ? 'renewed' : ((s.amountPaid||0)>0 ? 'partial' : 'unpaid');
     else if(DateUtil.isExpired(s.endDate)) s._status='expired';
     else if(DateUtil.isExpiringSoon(s.endDate)) s._status='expiring';
     else if(!(s.amountPaid>0) && (s.totalAmount||0)>0) s._status='unpaid';

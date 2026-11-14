@@ -155,6 +155,40 @@ const DateUtil = {
   }
 };
 
+/* ── Subscription lifecycle (shared by Subscriptions, Dashboard, Reports) ──
+   A subscription is "superseded" once a newer period exists for the same
+   subscriber + sport — renewed automatically, paid ahead, or renewed by hand.
+   A superseded subscription that is fully paid is closed: it is never
+   "Expiring Soon", "Active" or "Expired" any more — it shows as Renewed (grey).
+   If it still has a balance it stays visible as Unpaid / Partial. ── */
+const SubLife = {
+  groupKey(s) {
+    return (s.subscriberId || ('name:' + (s.subscriberName || ''))) + '|' + (s.sportId || s.sportName || '');
+  },
+  balance(s) { return Math.max(0, (Number(s.totalAmount) || 0) - (Number(s.amountPaid) || 0)); },
+  // Set of ids that already have a follow-up period.
+  supersededIds(list = []) {
+    const out = new Set();
+    const groups = new Map();
+    list.forEach(s => {
+      if (s.renewedToId) out.add(s.id);
+      const k = this.groupKey(s);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(s);
+    });
+    groups.forEach(items => {
+      if (items.length < 2) return;
+      items.forEach(s => {
+        if (out.has(s.id) || !s.endDate) return;
+        if (items.some(o => o.id !== s.id && (o.startDate || '') > (s.startDate || '') && (o.endDate || '') > s.endDate)) out.add(s.id);
+      });
+    });
+    return out;
+  },
+  // Closed = superseded AND nothing left to pay.
+  isClosed(s, superseded) { return !s.frozen && superseded.has(s.id) && this.balance(s) <= 0; },
+};
+
 /* ── Toast Notifications ──────────────────────────── */
 const Toast = {
   container: null,
