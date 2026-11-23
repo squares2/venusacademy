@@ -346,6 +346,7 @@ const SportsModule = (() => {
                   <input class="form-input" id="spf-price" type="number" min="0" placeholder="50">
                 </div>
                 <div class="form-error-msg"></div>
+                <div class="text-muted hidden" id="spf-price-hint" style="font-size:11px;margin-top:4px"></div>
               </div>
               <div class="form-group">
                 <label class="form-label">${t('icon_word')}</label>
@@ -394,6 +395,7 @@ const SportsModule = (() => {
     _editId=null;
     ['spf-name','spf-name-ar','spf-price','spf-desc'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
     document.getElementById('sport-modal-title').textContent = App.t('add_sport');
+    document.getElementById('spf-price-hint')?.classList.add('hidden');
     Modal.open('modal-sport');
   }
 
@@ -403,6 +405,8 @@ const SportsModule = (() => {
     const set=(id,v)=>{const el=document.getElementById(id);if(el)el.value=v||'';};
     set('spf-name',s.name); set('spf-name-ar',s.nameAr); set('spf-price',s.price);
     set('spf-icon',s.icon); set('spf-desc',s.description);
+    const hint=document.getElementById('spf-price-hint');
+    if(hint){ hint.textContent=App.t('sport_price_change_hint').replace('{d}',DateUtil.format(nextMonthStart())); hint.classList.remove('hidden'); }
     Modal.open('modal-sport');
   }
 
@@ -416,11 +420,66 @@ const SportsModule = (() => {
       description:document.getElementById('spf-desc').value.trim(),
       updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
     };
+    const old = _editId ? _all.find(x=>x.id===_editId) : null;
+    // repricePending: a previous re-pricing didn't finish (e.g. connection dropped) → saving again retries it
+    const priceChanged = !!old && ((Number(old.price)||0) !== data.price || !!old.repricePending);
+    if (priceChanged) data.repricePending = true;
     try {
       if(_editId){await _db.collection(COL.SPORTS).doc(_editId).update(data);}
       else{data.createdAt=firebase.firestore.FieldValue.serverTimestamp();await _db.collection(COL.SPORTS).add(data);}
-      Toast.success(App.t('saved')); Modal.close('modal-sport'); await loadData();
-    }catch(e){Toast.error(App.t('error_generic'));}
+    }catch(e){Toast.error(App.t('error_generic'));return;}
+    Modal.close('modal-sport');
+    // New monthly price → re-price the unpaid subscriptions that start next month or later
+    if(priceChanged){
+      try{
+        const r = await repriceUnpaid(_editId, data.name || old.name, data.price);
+        await _db.collection(COL.SPORTS).doc(_editId).update({ repricePending: false });
+        Toast.success(r.count
+          ? App.t('sport_repriced').replace('{n}',r.count).replace('{d}',DateUtil.format(r.from))
+          : App.t('saved'));
+      }catch(e){ console.error('Re-pricing subscriptions failed:', e); Toast.error(App.t('sport_reprice_failed')); }
+    } else Toast.success(App.t('saved'));
+    await loadData();
+  }
+
+  /* ── Sport price change → future unpaid subscriptions follow it ──
+     Affects subscriptions of this sport that are still unpaid (nothing paid)
+     and start on the 1st of next month or later. Current / paid / partly
+     paid periods keep their amount. Renewals and new subscriptions already
+     read the sport's current price. */
+  function nextMonthStart(){
+    const d = new Date(), n = new Date(d.getFullYear(), d.getMonth()+1, 1);
+    return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-01`;
+  }
+
+  function monthsOf(s){
+    if (Number(s.months) > 0) return Number(s.months);
+    if (!s.startDate || !s.endDate) return 1;
+    return Math.max(1, Math.round(DateUtil.diffDays(s.endDate, s.startDate) / 30.44));
+  }
+
+  async function repriceUnpaid(sportId, sportName, price){
+    const from = nextMonthStart();
+    const snap = await _db.collection(COL.SUBSCRIPTIONS).where('sportId','==',sportId).get();
+    const changes = [];
+    snap.docs.forEach(doc=>{
+      const s = doc.data();
+      if ((Number(s.amountPaid)||0) > 0) return;           // paid or partly paid → keep
+      if (!s.startDate || s.startDate < from) return;      // current / past period → keep
+      const total = Math.round(price * monthsOf(s) * 100) / 100;
+      if ((Number(s.totalAmount)||0) === total) return;    // already on this price
+      changes.push({ ref: doc.ref, s, total });
+    });
+    for (let i = 0; i < changes.length; i += 400) {
+      const batch = _db.batch();
+      changes.slice(i, i+400).forEach(c => batch.update(c.ref, { totalAmount: c.total, paymentMethod: 'unpaid' }));
+      await batch.commit();
+    }
+    await Promise.all(changes.map(c => logActivity(_db, 'subscription_updated', {
+      subscriber: c.s.subscriberName, subscriberId: c.s.subscriberId, sport: sportName,
+      amount: c.total, paid: 0, repricedFrom: c.s.totalAmount || 0,
+    })));
+    return { count: changes.length, from };
   }
 
   function del(id,name){

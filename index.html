@@ -24,6 +24,35 @@
   <link rel="stylesheet" href="styles/auth.css" />
   <link rel="stylesheet" href="styles/modals.css" />
   <link rel="stylesheet" href="styles/modules.css" />
+
+  <!-- App version (single source: version.js) -->
+  <script src="version.js"></script>
+  <style>
+    .ver-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 38px; padding: 0 10px; border-radius: var(--radius-md);
+      background: var(--bg-card); border: 1px solid var(--border-subtle);
+      color: var(--text-muted); font-size: 12px; font-weight: 700;
+      cursor: pointer; white-space: nowrap; transition: all var(--transition);
+    }
+    .ver-pill:hover { border-color: var(--border-default); color: var(--text-secondary); }
+    .ver-pill.is-outdated { color: #1a1a1a; background: var(--warning, #f59e0b); border-color: var(--warning, #f59e0b); animation: verPulse 1.6s ease-in-out infinite; }
+    @keyframes verPulse { 50% { box-shadow: 0 0 0 4px rgba(245,158,11,.25); } }
+    @media (max-width: 620px) { .ver-pill { height: 32px; padding: 0 8px; font-size: 11px; } }
+
+    .ver-banner {
+      position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+      z-index: 10000; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: center;
+      max-width: calc(100% - 24px); padding: 12px 16px; border-radius: 12px;
+      background: #1f1a0e; border: 1px solid var(--warning, #f59e0b); color: #fde68a;
+      box-shadow: 0 10px 30px rgba(0,0,0,.45); font-size: 13.5px; font-weight: 600;
+    }
+    .ver-banner button {
+      border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer;
+      background: var(--warning, #f59e0b); color: #1a1a1a; font-weight: 800; font-size: 13px;
+    }
+    .ver-banner button:disabled { opacity: .6; cursor: wait; }
+  </style>
 </head>
 
 <body>
@@ -105,7 +134,7 @@
           </button>
           <br />
           <span style="margin-top:8px;display:block">
-            Venus Gym © <span id="footer-year"></span>
+            Venus Gym © <span id="footer-year"></span> · <span data-app-version></span>
           </span>
         </div>
 
@@ -168,6 +197,11 @@
 
           <!-- Topbar actions -->
           <div class="topbar-actions">
+
+            <!-- App version — tap to check / force the latest update -->
+            <button type="button" class="ver-pill" id="ver-pill" title="App version">
+              <span data-app-version></span>
+            </button>
 
             <!-- Connection status (NetGuard) -->
             <button type="button" class="ng-pill ng-pill-online" id="ng-pill" data-ng="pill">
@@ -263,9 +297,104 @@
     // PWA service worker
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').catch(() => {});
+        navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
       });
     }
+
+    // ── App version badge + "newer update on the server?" check ─────────
+    (function () {
+      const LOCAL = Number(self.APP_VERSION) || 0;
+      const isAr = () => document.body.classList.contains('lang-ar');
+      const txt = {
+        badge:   v => 'v' + v,
+        newer:   v => isAr() ? `يوجد تحديث جديد (v${v}) — أنت تعمل على v${LOCAL}` : `New update available (v${v}) — you are on v${LOCAL}`,
+        update:  () => isAr() ? 'تحديث الآن' : 'Update now',
+        working: () => isAr() ? 'جاري التحديث…' : 'Updating…',
+        latest:  () => isAr() ? `أنت على آخر إصدار (v${LOCAL})` : `You are on the latest version (v${LOCAL})`,
+        offline: () => isAr() ? 'لا يمكن التحقق من التحديث الآن (الاتصال ضعيف)' : "Couldn't check for updates right now (weak connection)",
+      };
+      document.querySelectorAll('[data-app-version]').forEach(el => el.textContent = txt.badge(LOCAL));
+
+      const AUTO_KEY = 'venus_ver_autoreload';
+      let remote = 0, banner = null, updating = false;
+
+      // Ask the server which version is live (bypasses the service worker + browser cache)
+      async function fetchRemote() {
+        const r = await fetch('version.js?vcheck=' + Date.now(), { cache: 'no-store' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const m = (await r.text()).match(/APP_VERSION\s*=\s*(\d+)/);
+        if (!m) throw new Error('no version');
+        return Number(m[1]);
+      }
+
+      // Safe moment to reload by itself: still on the login screen, or just opened with no dialog open
+      function safeToAutoReload() {
+        const shell = document.getElementById('app-shell');
+        const onLogin = shell && shell.classList.contains('hidden');
+        const justOpened = performance.now() < 20000 && !document.querySelector('.open[id^="modal"], .modal-overlay.open');
+        return onLogin || justOpened;
+      }
+
+      async function applyUpdate() {
+        if (updating) return; updating = true;
+        const btn = banner && banner.querySelector('button');
+        if (btn) { btn.disabled = true; btn.textContent = txt.working(); }
+        try {
+          if ('serviceWorker' in navigator) {
+            const reg = await navigator.serviceWorker.getRegistration();
+            if (reg) await reg.update().catch(() => {});
+          }
+          if (window.caches) {
+            const keys = await caches.keys();
+            await Promise.all(keys.filter(k => k.startsWith('venus-gym-')).map(k => caches.delete(k)));
+          }
+        } catch (e) { /* reload anyway */ }
+        location.reload();
+      }
+
+      function showBanner() {
+        if (!banner) {
+          banner = document.createElement('div');
+          banner.className = 'ver-banner';
+          banner.innerHTML = '<span></span><button type="button"></button>';
+          banner.querySelector('button').addEventListener('click', applyUpdate);
+          document.body.appendChild(banner);
+        }
+        banner.querySelector('span').textContent = txt.newer(remote);
+        if (!updating) banner.querySelector('button').textContent = txt.update();
+        const pill = document.getElementById('ver-pill');
+        if (pill) { pill.classList.add('is-outdated'); pill.title = txt.newer(remote); }
+      }
+
+      async function check(manual) {
+        try {
+          remote = await fetchRemote();
+        } catch (e) {
+          if (manual && typeof Toast !== "undefined") Toast.error(txt.offline());
+          return;
+        }
+        if (remote > LOCAL) {
+          // Reload by itself once per new version, only when nothing can be lost
+          let tried = {}; try { tried = JSON.parse(sessionStorage.getItem(AUTO_KEY) || '{}'); } catch (e) {}
+          if (!manual && !tried[remote] && safeToAutoReload()) {
+            tried[remote] = 1; try { sessionStorage.setItem(AUTO_KEY, JSON.stringify(tried)); } catch (e) {}
+            return applyUpdate();
+          }
+          showBanner();
+          if (manual) applyUpdate();
+        } else if (manual && typeof Toast !== "undefined") {
+          Toast.success(txt.latest());
+        }
+      }
+
+      const pill = document.getElementById('ver-pill');
+      if (pill) pill.addEventListener('click', () => check(true));
+
+      window.addEventListener('load', () => setTimeout(() => check(false), 1500));
+      setInterval(() => check(false), 5 * 60 * 1000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) check(false); });
+      window.addEventListener('online', () => check(false));
+    })();
 
     // ── PWA install button ──────────────────────────────
     (function () {
